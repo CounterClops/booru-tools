@@ -3,6 +3,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from loguru import logger
 import json
+import shutil
 
 from boorus.shared import errors
 from boorus.shared.meta import CommonBooru
@@ -235,14 +236,12 @@ class BooruTools:
                 
                 # Process pool data
                 post_pools = metadata.get("pools", [])
-                post_id = metadata.get("id", "")
-                if post_id:
-                    for pool_id in post_pools:
-                        try:
-                            pools[pool_id]
-                        except KeyError:
-                            pools[pool_id] = []
-                        pools[pool_id] += [destination_post_id]
+                for pool_id in post_pools:
+                    try:
+                        pools[pool_id]
+                    except KeyError:
+                        pools[pool_id] = []
+                    pools[pool_id] += [metadata]
 
                 # Process tag category data
                 new_tag_categories = metadata.get("tag_category_map", {})
@@ -253,9 +252,10 @@ class BooruTools:
                 gallery_dl.download_urls(urls=post_urls, download_folder=download_folder)
             
             self.upload_posts(metadata_list=posts_to_download)
-        
-        self.update_tag_categories(tag_categories=tag_categories)
+            shutil.rmtree(download_folder)
+
         self.update_pools(pools=pools)
+        self.update_tag_categories(tag_categories=tag_categories)
         
     def check_post_exists(self, metadata:dict) -> int:
         existing_post_id = None
@@ -314,9 +314,29 @@ class BooruTools:
             logger.debug(f"Updating tag '{tag}' to category '{category}'")
             api_plugin.push_tag(tag=tag, tag_category=category)
 
-    def update_pools(self, pools:list):
-        # Go through each pool
-        # get pool info, title, post order etc
-        # Create pool
-        # Update pool
-        pass
+    def update_pools(self, pools:dict):
+        destination = self.config["destination"]
+        destination_api_plugin = self.find_api_plugin(domain=destination, category=destination)
+
+        for source_pool_id, metadata_list in pools.items():
+            metadata = metadata_list[0]
+
+            domain = urlparse(metadata.get("file_url", "")).hostname
+            category = metadata["category"]
+
+            api_plugin = self.find_api_plugin(domain=domain, category=category)
+            pool = api_plugin.get_pool(id=source_pool_id)
+            
+            post_ids_ordered = []
+            for post_id in pool.posts:
+                metadata = next((metadata for metadata in metadata_list if metadata['id'] == post_id), None)
+
+                if not metadata:
+                    logger.warning(f"Missing metadata for post ID {post_id} in pool {pool.id}, skipping")
+                    continue
+                
+                destination_post_id = self.check_post_exists(metadata=metadata)
+                post_ids_ordered.append(destination_post_id)
+            
+            pool.posts = post_ids_ordered
+            destination_api_plugin.push_pool(pool=pool)

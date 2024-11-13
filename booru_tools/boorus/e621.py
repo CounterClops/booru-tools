@@ -1,5 +1,7 @@
-from boorus.shared import errors, meta, api_client
+from boorus.shared import errors, meta, api_client, base_classes
 from loguru import logger
+
+import requests
 
 class E621Meta(meta.CommonBooru):
     _DOMAINS = [
@@ -13,6 +15,7 @@ class E621Meta(meta.CommonBooru):
     def __init__(self, config:dict={}):
         logger.debug(f"Loaded {self.__class__.__name__}")
         self.url_base = "https://e621.net"
+        
         self.safety_mapping = {
             "safe": "safe",
             "s": "safe",
@@ -95,8 +98,32 @@ class E621Client(api_client.ApiClient):
 
     def __init__(self, config:dict={}) -> None:
         self.url_base = "https://e621.net"
-        self.headers = {'Accept': 'application/json'}
+        self.headers = {
+            'Accept': 'application/json',
+            "User-Agent": "booru-tools/1.0"
+        }
         self.import_config(config=config)
 
-    def get_pools(self, ):
-        pass
+    def get_pool(self, id:int) -> base_classes.Pool:
+        url = f"{self.url_base}/pools.json?search[id]={id}"
+
+        response = requests.get(
+            url=url,
+            headers=self.headers
+        )
+
+        pools = response.json()
+
+        try:
+            pool_data = pools[0]
+            pool = base_classes.Pool(
+                id=pool_data["id"],
+                title=pool_data["name"],
+                category=pool_data.get("category"),
+                description=pool_data.get("description"),
+                posts=pool_data["post_ids"]
+            )
+        except KeyError:
+            pool = None
+
+        return pool

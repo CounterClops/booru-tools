@@ -268,11 +268,107 @@ class SzurubooruClient(api_client.ApiClient):
     
     def push_tag(self, tag:str, tag_category:str="") -> dict:
         original_tag = self.get_tag(tag=tag)
-        updated_tag = self.update_tag(
-            version_id=original_tag["version"],
-            tag=tag,
-            tag_category=tag_category
-        )
+        if original_tag:
+            updated_tag = self.update_tag(
+                version_id=original_tag["version"],
+                tag=tag,
+                tag_category=tag_category
+            )
+        else:
+            updated_tag = self.create_tag(
+                tag=tag,
+                tag_category=tag_category
+            )
 
         return updated_tag
 
+    def pool_search(self, search_query:str, search_size:int=100, offset:int=0) -> list:
+        url = f"{self.szurubooru_api_url}/pools/"
+        params = {
+            "offset": offset,
+            "limit": search_size,
+            "query": search_query
+        }
+
+        response = requests.get(
+            url=url,
+            headers=self.headers,
+            params=params
+        )
+
+        search = PagedSearch(
+            **response.json()
+        )
+
+        pools = search.results
+        
+        return pools
+
+    def create_pool(self, name:str, category:str, description:str, posts:list):
+        logger.debug(f"Creating pool '{name}' with {len(posts)}")
+        url = f"{self.szurubooru_api_url}/pool"
+        data = {
+            "names": [name],
+            "category": category,
+            "description": description,
+            "posts": posts
+        }
+
+        response = requests.post(
+            url=url,
+            headers=self.headers,
+            json=data
+        )
+
+        pool = response.json()
+        
+        return pool
+
+    def update_pool(self, id:int, version:int, name:str, category:str, description:str, posts:list):
+        logger.debug(f"Updating pool '{name}' with {len(posts)}")
+        url = f"{self.szurubooru_api_url}/pool/{id}"
+        data = {
+            "version": version,
+            "names": name,
+            "category": category,
+            "description": description,
+            "posts": posts
+        }
+
+        response = requests.put(
+            url=url,
+            headers=self.headers,
+            json=data
+        )
+
+        pool = response.json()
+        
+        return pool
+
+    def push_pool(self, pool:base_classes.Pool):
+        pools = self.pool_search(search_query=pool.title)
+        existing_pool = next((possible_pool for possible_pool in pools if pool.title in possible_pool['names']), None)
+
+        post_list = pool.posts
+        print(post_list)
+
+        if existing_pool:
+            updated_pool = self.update_pool(
+                id=existing_pool["id"],
+                version=existing_pool["version"],
+                name=pool.title,
+                category=pool.category,
+                description=pool.description,
+                posts=post_list
+            )
+        else:
+            updated_pool = self.create_pool(
+                name=pool.title,
+                category=pool.category,
+                description=pool.description,
+                posts=post_list
+            )
+        
+        logger.info(updated_pool)
+        
+        return updated_pool

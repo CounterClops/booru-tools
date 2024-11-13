@@ -18,11 +18,14 @@ class Post:
 
 @dataclass
 class Pool:
-    source_id: int
+    id: int
+    title: str
+    category: str
+    description: str = ""
     posts: list = field(default_factory=list)
 
 @dataclass
 class PoolPost:
-    source_id: int
+    id: int
     destination_id: int
     metadata: dict
