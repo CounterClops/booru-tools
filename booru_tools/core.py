@@ -298,7 +298,7 @@ class BooruTools:
             logger.info(f"Starting upload of {media_file}")
             destination = self.config["destination"]
             api_plugin = self.find_api_plugin(domain=destination, category=destination)
-            post_id = api_plugin.upload_file(
+            api_plugin.upload_file(
                 file=media_file, 
                 post=post
             )

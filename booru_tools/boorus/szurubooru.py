@@ -169,8 +169,6 @@ class SzurubooruClient(api_client.ApiClient):
             content_token=content_token, 
             post=post
         )
-
-        return post["id"]
     
     def search_tags(self, search_query:str, search_size:int=100, offset:int=0):
         url = f"{self.szurubooru_api_url}/tags/"
