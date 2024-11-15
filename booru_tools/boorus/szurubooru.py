@@ -53,6 +53,7 @@ class SzurubooruClient(api_client.ApiClient):
     _NAME = "szurubooru"
 
     def __init__(self, config:dict={}) -> None:
+        self.image_distance_threshold = 0.15
         self.import_config(config=config)
         logger.debug(f'username = {self.username}')
         logger.debug(f'url_base = {self.url_base}')
@@ -97,6 +98,18 @@ class SzurubooruClient(api_client.ApiClient):
         if posts:
             post_id = posts[0]['id']
             return post_id
+        return None
+    
+    def check_sources_post_exists(self, sources:list) -> int:
+        for source in sources:
+            search_query = f"source:{source}"
+            posts = self.post_search(
+                search_query=search_query,
+                search_size=1
+            )
+            if posts:
+                post_id = posts[0]['id']
+                return post_id
         return None
     
     def pool_search(self, search_query:str, search_size:int=100, offset:int=0) -> list:
@@ -165,8 +178,45 @@ class SzurubooruClient(api_client.ApiClient):
 
         return post
 
-    def upload_file(self, file:Path, post:base_classes.Post):
+    def reverse_image_search(self, content_token:str):
+        logger.debug("Doing reverse image search")
+        url = f"{self.szurubooru_api_url}/posts/reverse-search"
+
+        data = {
+            "contentToken": content_token
+        }
+
+        response = requests.post(
+            url=url,
+            json=data,
+            headers=self.headers
+        )
+
+        image_search = response.json()
+
+        return image_search
+
+    def push_post(self, file:Path, post:base_classes.Post):
         content_token = self.upload_temporary_file(file=file)
+        reverse_image_search = self.reverse_image_search(content_token=content_token)
+        
+        exact_post = reverse_image_search.get("exactPost", None)
+
+        if exact_post:
+            logger.info("Exact post already exists, skipping post creation")
+            return
+        
+        similar_posts = reverse_image_search.get("similarPosts", [])
+
+        if similar_posts:
+            closest_posts = [post for post in similar_posts if post["distance"] < self.image_distance_threshold]
+            sorted_posts = sorted(closest_posts, key=lambda x: x["distance"])
+            if sorted_posts:
+                min_distance = sorted_posts[0].get("distance", "NA")
+                max_distance = sorted_posts[-1].get("distance", "NA")
+                logger.info(f"Similar posts already exists {len(sorted_posts)} with a range of {min_distance}-{max_distance}, skipping post creation")
+                return
+
         post = self.create_post(
             content_token=content_token, 
             post=post
@@ -371,6 +421,14 @@ class SzurubooruClient(api_client.ApiClient):
         return escaped_string
 
     def push_pool(self, pool:base_classes.Pool):
+        """Create/update the provided pool
+
+        Args:
+            pool (base_classes.Pool): The pool data to use for the update or creation
+
+        Returns:
+            _type_: The returned pool data
+        """
         search_query = f"name:{self.escape_string(pool.title)}"
         logger.debug(f"Checking for pool '{pool.title}' with search '{search_query}'")
         pools = self.pool_search(search_query=search_query)

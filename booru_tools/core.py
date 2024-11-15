@@ -264,6 +264,14 @@ class BooruTools:
         self.update_pools(pools=pools)
 
     def check_post_exists(self, metadata:dict) -> int:
+        """Check if the provided post (see metadata) already exists on the destination booru
+
+        Args:
+            metadata (dict): The post metadata
+
+        Returns:
+            int: The post ID of the destination post
+        """
         existing_post_id = None
         domain = urlparse(metadata.get("file_url", "")).hostname
         category = metadata["category"]
@@ -278,14 +286,16 @@ class BooruTools:
             logger.debug(f"Found md5 in metadata of value '{md5}'")
             existing_post_id = api_plugin.check_md5_post_exists(md5_hash=md5)
         except errors.MissingMd5:
-            logger.debug(f"No md5 attribute")
+            logger.debug(f"No md5 attribute to check on {metadata.get('id', 'NA')}")
 
-        # if not existing_post_id:
-        #     try:
-        #         post_url = metadata["post_url"]
-        #         logger.debug(f"Found post_url in metadata of value '{post_url}'")
-        #     except KeyError:
-        #         pass
+        if not existing_post_id:
+            try:
+                post_url = metadata["post_url"]
+                logger.debug(f"Found post_url in metadata of value '{post_url}'")
+                sources = [post_url]
+                existing_post_id = api_plugin.check_sources_post_exists(sources=sources)
+            except KeyError:
+                logger.debug(f"No post_url attribute to check on {metadata.get('id', 'NA')}")
 
         if existing_post_id:
             logger.debug(f"Existing post found on '{destination}'")
@@ -311,7 +321,7 @@ class BooruTools:
             logger.info(f"Starting upload of {media_file.name}")
             destination = self.config["destination"]
             api_plugin = self.find_api_plugin(domain=destination, category=destination)
-            api_plugin.upload_file(
+            api_plugin.push_post(
                 file=media_file, 
                 post=post
             )
