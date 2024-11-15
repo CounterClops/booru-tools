@@ -4,7 +4,7 @@ from pathlib import Path
 from loguru import logger
 
 class GalleryDl:
-    def __init__(self, tmp_path:Path=Path("tmp"), cookies:str="", urls:dict=[], input_file:str="", verbose:bool=False):
+    def __init__(self, tmp_path:Path=Path("tmp"), cookies:str="", urls:dict=[], input_file:str="", verbose:bool=False, warning:bool=True):
         self.tmp_path = tmp_path
         self.basic_params = []
         self.extra_params = []
@@ -14,7 +14,14 @@ class GalleryDl:
             self.basic_params.append(f"--cookies={cookies}")
         if verbose:
             logger.debug("Setting gallery-dl to verbose")
-            self.basic_params.append("-q")
+            self.basic_params.append("--verbose")
+        else:
+            if warning:
+                logger.debug("Setting gallery-dl to warning")
+                self.basic_params.append("--warning")
+            else:
+                logger.debug("Setting gallery-dl to quiet")
+                self.basic_params.append("--quiet")
         if urls:
             logger.debug(f"Setting urls to {urls}")
             self.extra_params += urls

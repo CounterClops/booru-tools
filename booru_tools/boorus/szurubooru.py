@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 import requests
 
 from pathlib import Path
+import urllib.parse
 from boorus.shared import errors, api_client, base_classes, meta
 from loguru import logger
 
@@ -140,6 +141,7 @@ class SzurubooruClient(api_client.ApiClient):
             )
 
         token = response.json()["token"]
+        
         logger.debug(f"Uploaded file to temporary endpoint with token={token}")
         return token
 
@@ -193,7 +195,8 @@ class SzurubooruClient(api_client.ApiClient):
         return tags
 
     def get_tag(self, tag:str, search_size:int=100, offset:int=0):
-        url = f"{self.szurubooru_api_url}/tag/{tag}"
+        safe_tag = urllib.parse.quote(tag)
+        url = f"{self.szurubooru_api_url}/tag/{safe_tag}"
 
         response = requests.get(
             url=url,
@@ -266,6 +269,13 @@ class SzurubooruClient(api_client.ApiClient):
     
     def push_tag(self, tag:str, tag_category:str="") -> dict:
         original_tag = self.get_tag(tag=tag)
+
+        tag_category_matches = original_tag.get("category", "") == tag_category
+
+        if tag_category_matches:
+            logger.debug(f"Skipping update on tag '{tag}' as it already matches")
+            return original_tag
+        
         if original_tag:
             updated_tag = self.update_tag(
                 version_id=original_tag["version"],
@@ -294,9 +304,14 @@ class SzurubooruClient(api_client.ApiClient):
             params=params
         )
 
-        search = PagedSearch(
-            **response.json()
-        )
+        try:
+            search = PagedSearch(
+                **response.json()
+            )
+        except Exception as e:
+            print(e)
+            print(response.json())
+            exit()
 
         pools = search.results
         
@@ -343,12 +358,25 @@ class SzurubooruClient(api_client.ApiClient):
         
         return pool
 
+    def escape_string(self, string) -> str:
+        characters_to_escape = ['\\', '*', ':', '-', '.']
+            
+        escaped_string = ""
+        for char in string:
+            if char in characters_to_escape:
+                escaped_string += '\\' + char  # Prepend backslash
+            else:
+                escaped_string += char  # Leave unchanged
+        
+        return escaped_string
+
     def push_pool(self, pool:base_classes.Pool):
-        pools = self.pool_search(search_query=pool.title)
+        search_query = f"name:{self.escape_string(pool.title)}"
+        logger.debug(f"Checking for pool '{pool.title}' with search '{search_query}'")
+        pools = self.pool_search(search_query=search_query)
         existing_pool = next((possible_pool for possible_pool in pools if pool.title in possible_pool['names']), None)
 
         post_list = pool.posts
-        print(post_list)
 
         if existing_pool:
             updated_pool = self.update_pool(
@@ -362,11 +390,9 @@ class SzurubooruClient(api_client.ApiClient):
         else:
             updated_pool = self.create_pool(
                 name=pool.title,
-                category=pool.category,
+                category=pool.category,  
                 description=pool.description,
                 posts=post_list
             )
-        
-        logger.info(updated_pool)
         
         return updated_pool

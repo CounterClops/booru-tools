@@ -230,7 +230,7 @@ class BooruTools:
                     logger.info(f"Queuing up '{metadata["post_url"]}' for download")
                     posts_to_download.append(metadata)
                 else:
-                    pass
+                    logger.debug(f"Updating post {destination_post_id}")
                     # Update tags on existing posts if required
                     # Update sources on existing posts
                 
@@ -248,15 +248,21 @@ class BooruTools:
                 tag_categories = {**tag_categories, **new_tag_categories}
 
             if posts_to_download:
+                logger.info(f"Downloading {len(posts_to_download)} posts")
                 post_urls = [metadata["post_url"] for metadata in posts_to_download]
                 gallery_dl.download_urls(urls=post_urls, download_folder=download_folder)
+
+            try:
+                self.upload_posts(metadata_list=posts_to_download)
+            except Exception as e:
+                logger.critical(f"Post upload failed due to {e}")
             
-            self.upload_posts(metadata_list=posts_to_download)
+            logger.debug(f"Deleting '{download_folder}' folder")
             shutil.rmtree(download_folder)
 
-        self.update_pools(pools=pools)
         self.update_tag_categories(tag_categories=tag_categories)
-        
+        self.update_pools(pools=pools)
+
     def check_post_exists(self, metadata:dict) -> int:
         existing_post_id = None
         domain = urlparse(metadata.get("file_url", "")).hostname
@@ -272,7 +278,14 @@ class BooruTools:
             logger.debug(f"Found md5 in metadata of value '{md5}'")
             existing_post_id = api_plugin.check_md5_post_exists(md5_hash=md5)
         except errors.MissingMd5:
-            pass
+            logger.debug(f"No md5 attribute")
+
+        # if not existing_post_id:
+        #     try:
+        #         post_url = metadata["post_url"]
+        #         logger.debug(f"Found post_url in metadata of value '{post_url}'")
+        #     except KeyError:
+        #         pass
 
         if existing_post_id:
             logger.debug(f"Existing post found on '{destination}'")
@@ -295,7 +308,7 @@ class BooruTools:
                 metadata=metadata
             )
 
-            logger.info(f"Starting upload of {media_file}")
+            logger.info(f"Starting upload of {media_file.name}")
             destination = self.config["destination"]
             api_plugin = self.find_api_plugin(domain=destination, category=destination)
             api_plugin.upload_file(
@@ -312,7 +325,10 @@ class BooruTools:
 
         for tag, category in tag_categories.items():
             logger.debug(f"Updating tag '{tag}' to category '{category}'")
-            api_plugin.push_tag(tag=tag, tag_category=category)
+            try:
+                api_plugin.push_tag(tag=tag, tag_category=category)
+            except Exception as e:
+                logger.warning(f"Error updating the tag '{tag}' due to {e}")
 
     def update_pools(self, pools:dict):
         destination = self.config["destination"]
