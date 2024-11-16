@@ -1,4 +1,8 @@
 from dataclasses import dataclass, field
+from typing import Optional
+
+from api_client import ApiClient
+from meta import CommonBooru
 
 class Base():
     _DOMAINS = []
@@ -10,14 +14,23 @@ class Base():
             setattr(self, key, value)
 
 @dataclass
-class Post:
+class Resource:
+    metadata_plugin: Optional[CommonBooru] = None
+    api_plugin: Optional[ApiClient] = None
+    metadata: Optional[dict] = {}
+
+    # https://medium.com/@thoroc/python-data-validation-using-dataclasses-29f0cb38bbc8
+    # Look into factory functions that do the conversion
+
+@dataclass
+class Post(Resource):
     source: str = None
     relations: list = field(default_factory=list)
     tags: list = field(default_factory=list)
-    safety:str = 'safe'
+    safety: str = 'safe'
 
 @dataclass
-class Pool:
+class Pool(Resource):
     id: int
     title: str
     category: str
@@ -25,7 +38,6 @@ class Pool:
     posts: list = field(default_factory=list)
 
 @dataclass
-class PoolPost:
+class PoolPost(Resource):
     id: int
     destination_id: int
-    metadata: dict
