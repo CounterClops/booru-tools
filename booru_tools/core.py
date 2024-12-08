@@ -1,179 +1,81 @@
-import plugin_loader
 from pathlib import Path
 from urllib.parse import urlparse
 from loguru import logger
-import json
-import shutil
+import json, shutil, functools
 
-from boorus.shared import errors
-from boorus.shared.meta import CommonBooru
-from boorus.shared.api_client import ApiClient
-from tools.gallery_dl import GalleryDl
+from booru_tools import plugin_loader
+from booru_tools.plugins import _template
+from booru_tools.shared import errors, resources
+from booru_tools.tools.gallery_dl import GalleryDl
 
 class BooruTools:
-    def __init__(self, booru_plugin_directory:Path="boorus"):
+    def __init__(self, booru_plugin_directory:Path="plugins"):
         program_path = Path(__file__).parent
         self.booru_plugin_directory = program_path / Path(booru_plugin_directory)
-
-        self.metadata_loader = plugin_loader.PluginLoader(
-            plugin_class=CommonBooru
-        )
-
-        self.api_loader = plugin_loader.PluginLoader(
-            plugin_class=ApiClient
-        )
-
         self.load_plugins()
-
-        self.plugin_configs = {
-            "szurubooru" : {
-                "url_base": "https://szurubooru.equus.soy",
-                "username": "e621-sync",
-                "password": "7dc645f5-b525-43b0-a27b-3362d5e8bb2f"
-            }
-        }
 
         self.config = {
             "destination": "szurubooru"
         }
 
-    def load_plugins(self):
+    def load_plugins(self) -> None:
         """Loads the plugins for this instances set of loaders
         """
+        self.metadata_loader = plugin_loader.PluginLoader(
+            plugin_class=_template.MetadataPlugin
+        )
+
         self.metadata_loader.load_plugins_from_directory(directory=self.booru_plugin_directory)
+
+        self.api_loader = plugin_loader.PluginLoader(
+            plugin_class=_template.ApiPlugin
+        )
+
         self.api_loader.load_plugins_from_directory(directory=self.booru_plugin_directory)
+    
+    def create_post_from_metadata(self, metadata:resources.Metadata, download_link:str) -> resources.InternalPost:
+        try:
+            file_url:str = metadata["file"]["url"]
+            domain:str = urlparse(file_url).hostname
+        except KeyError:
+            domain:str = urlparse(download_link).hostname
 
-    def find_plugin(self, plugins:list, domain:str="", category:str="") -> plugin_loader.Plugin:
-        """Find plugin that matches the desired service, it will return a plugin if any single condition matches
+        try:
+            post_category:str = metadata["category"]
+        except KeyError:
+            post_category:str = ""
+        
+        metadata_plugin:_template.MetadataPlugin = self.metadata_loader.init_plugin(domain=domain, category=post_category)
+        api_plugin:_template.ApiPlugin = self.api_loader.init_plugin(domain=domain, category=post_category)
 
-        Args:
-            plugins (list): The list of plugins to search
-            domain (list, optional): The domain of the service to match with the plugin. Defaults to [].
-            category (list, optional): The category of the service to match with the plugin. Defaults to [].
-
-        Raises:
-            plugin_loader.NoPluginFound: When a plugin that matches the provided criteria isn't found in the provided list of plugins
-
-        Returns:
-            _type_: The first plugin to match the desired conditions
-        """
-        logger.debug(f"Searching {len(plugins)} plugins for domain={domain}, category={category}")
-
-        for plugin in plugins:
-            try:
-                plugin_domains = plugin.obj._DOMAINS
-                logger.debug(f"Domain search: '{domain}' in '{plugin_domains}'")
-                plugin_domain_matches = any(plugin_domain in domain for plugin_domain in plugin_domains)
-                if plugin_domain_matches:
-                    logger.debug(f"Found '{plugin}' with domain match")
-                    return plugin
-            except (TypeError, AttributeError):
-                pass
-            
-            try:
-                plugin_category = plugin.obj._CATEGORY
-                logger.debug(f"Category search: '{category}' in '{plugin_category}'")
-                plugin_category_matches = any(category in plugin_category for plugin_category in plugin_category)
-                if plugin_category_matches:
-                    logger.debug(f"Found '{plugin}' with category match")
-                    return plugin
-            except (TypeError, AttributeError):
-                pass
-            
-        raise plugin_loader.NoPluginFound
-
-    def find_metadata_plugin(self, domain:str="", category:str="") -> plugin_loader.Plugin:
-        """Find metadata plugin that matches the desired domain or category
-
-        Args:
-            domain (str, optional): The domain to search for in the plugin. Defaults to "".
-            category (str, optional): The category to search for in the plugin. Defaults to "".
-
-        Returns:
-            plugin_loader.Plugin: The first plugin that matches the search
-        """
-        logger.debug(f"Starting metadata plugin search for domain={domain}, category={category}")
-
-        plugin = self.find_plugin(
-            plugins=self.metadata_loader.plugins,
-            domain=domain,
-            category=category
+        post_data = {
+            "id": metadata_plugin.get_id(metadata=metadata),
+            "category": post_category,
+            "sources": metadata_plugin.get_sources(metadata=metadata),
+            "description": metadata_plugin.get_description(metadata=metadata),
+            "tags": metadata_plugin.get_tags(metadata=metadata),
+            "created_at": metadata_plugin.get_created_at(metadata=metadata),
+            "updated_at": metadata_plugin.get_updated_at(metadata=metadata),
+            "relations": metadata_plugin.get_relations(metadata=metadata),
+            "safety": metadata_plugin.get_safety(metadata=metadata),
+            "md5": metadata_plugin.get_md5(metadata=metadata),
+            "post_url": metadata_plugin.get_post_url(metadata=metadata),
+            "pools": metadata_plugin.get_pools(metadata=metadata),
+            "local_file": self.get_media_file(metadata=metadata),
+            "plugins": resources.InternalPlugins(
+                api=api_plugin,
+                meta=metadata_plugin
+            ),
+            "metadata": metadata
+        }
+        
+        post = resources.InternalPost(
+            **post_data
         )
+        
+        return post
 
-        try:
-            plugin_name = plugin.obj._NAME
-            logger.debug(f"Checking for plugin config for '{plugin_name}'")
-            config = self.plugin_configs[plugin_name]
-            logger.debug(f"Found plugin config for '{plugin_name}'")
-        except (AttributeError, KeyError):
-            logger.debug(f"No plugin config found for '{plugin_name}'")
-            config = {}
-
-        return plugin(config=config)
-
-    def find_api_plugin(self, domain:str="", category:str="") -> plugin_loader.Plugin:
-        """Find api plugin that matches the desired domain or category
-
-        Args:
-            domain (str, optional): The domain to search for in the plugin. Defaults to "".
-            category (str, optional): The category to search for in the plugin. Defaults to "".
-
-        Returns:
-            plugin_loader.Plugin: The first plugin that matches the search
-        """
-        logger.debug(f"Starting api plugin search for domain={domain}, category={category}")
-
-        plugin = self.find_plugin(
-            plugins=self.api_loader.plugins,
-            domain=domain,
-            category=category
-        )
-
-        try:
-            plugin_name = plugin.obj._NAME
-            logger.debug(f"Checking for plugin config for '{plugin_name}'")
-            config = self.plugin_configs[plugin_name]
-            logger.debug(f"Found plugin config for '{plugin_name}'")
-        except (AttributeError, KeyError):
-            logger.debug(f"No plugin config found for '{plugin_name}'")
-            config = {}
-
-        return plugin(config=config)
-
-    def adjust_metadata(self, metadata:dict) -> dict:
-        """Parse the provided metadata and update using the appropriate metadata plugin
-
-        Args:
-            metadata (dict): The input metadata object
-
-        Returns:
-            metadata (dict): The updated metadata object
-        """
-        domain = urlparse(metadata.get("file_url", "")).hostname
-        category = metadata["category"]
-        metadata_plugin = self.find_metadata_plugin(domain=domain, category=category)
-
-        try:
-            metadata = metadata_plugin.add_tag_category_map(metadata)
-        except AttributeError:
-            logger.debug(f"No 'add_tag_category_map' function in {metadata_plugin}")
-
-        try:
-            metadata = metadata_plugin.add_post_url(metadata)
-        except AttributeError:
-            logger.debug(f"No 'add_post_url' function in {metadata_plugin}")
-
-        try:
-            metadata = metadata_plugin.update_sources(metadata=metadata)
-            post_url = metadata["post_url"]
-            metadata["sources"].append(post_url)
-            logger.debug(f"Updates sources on {metadata['id']} to {metadata["sources"]}")
-        except AttributeError:
-            logger.debug(f"No 'update_sources' function in {metadata_plugin}")
-
-        return metadata
-
-    def import_metadata(self, download_directory:Path, metadata_file_extension:str="json") -> list:
+    def import_metadata_files(self, download_directory:Path, metadata_file_extension:str="json") -> list[resources.Metadata]:
         """Imports the metadata from the provided metadata files
 
         Args:
@@ -181,25 +83,25 @@ class BooruTools:
             metadata_file_extension (str, optional): The file extension of the metadata files. Defaults to "json".
 
         Returns:
-            metadata_list (list): The list of metadata that was pulled from each file
+            metadata_list (list[resources.Metadata]): The list of metadata that was pulled from each file
         """
-        metadata_list = []
+        metadata_list:list[resources.Metadata] = []
+
         for json_file in download_directory.rglob(f"*.{metadata_file_extension}"):
             with open(json_file) as file:
-                metadata = json.load(file)
-                metadata["metadata_absolute_path"] = json_file.absolute()
+                metadata = resources.Metadata(
+                    data=json.load(file),
+                    file=json_file.absolute()
+                )
                 metadata_list.append(metadata)
 
         return metadata_list
 
-    def get_media_file(self, metadata:dict) -> Path:
-        metadata_file = Path(metadata["metadata_absolute_path"])
-
-        media_file = metadata_file.parent / metadata_file.stem
+    def get_media_file(self, metadata:resources.Metadata) -> Path | None:
+        media_file = metadata.file.parent / metadata.file.stem
         if media_file.exists():
-            logger.debug(f"Confirmed '{media_file}' file exists, returning")
+            logger.debug(f"Found '{media_file}' media file")
             return media_file
-        
         return None
 
     def sync(self, urls:dict=[], input_file:str=""):
@@ -213,57 +115,63 @@ class BooruTools:
             only_metadata=True
         )
 
-        pools = {}
-        tag_categories = {}
+        # pools:dict[int, resources.InternalPool] = {}
+        tags:list[resources.InternalTag] = []
+
+        destination = self.config["destination"]
+        destination_api_plugin:_template.ApiPlugin = self.api_loader.init_plugin(domain=destination, category=destination)
 
         for download_folder in metadata_downloader:
-            metadata_list = self.import_metadata(download_directory=download_folder)
+            metadata_list = self.import_metadata_files(download_directory=download_folder)
             logger.debug(f"Reviewing the metadata of {len(metadata_list)} files")
 
-            posts_to_download = []
+            posts_to_download:list[resources.InternalPost] = []
+            posts:list[resources.InternalPost] = []
 
             for metadata in metadata_list:
-                metadata = self.adjust_metadata(metadata=metadata) # Update sources if required
-                destination_post_id = self.check_post_exists(metadata=metadata)
+                post:resources.InternalPost = self.create_post_from_metadata(metadata=metadata, download_link="")
+                posts.append(post)
 
-                if not destination_post_id:
-                    logger.info(f"Queuing up '{metadata["post_url"]}' for download")
-                    posts_to_download.append(metadata)
-                else:
-                    logger.debug(f"Updating post {destination_post_id}")
-                    # Update tags on existing posts if required
-                    # Update sources on existing posts
+                existing_post = destination_api_plugin.find_exact_post(post=post)
+
+                if not existing_post:
+                    logger.info(f"Queuing up '{post.post_url}' for download")
+                    posts_to_download.append(post)
                 
-                # Process pool data
-                post_pools = metadata.get("pools", [])
-                for pool_id in post_pools:
-                    try:
-                        pools[pool_id]
-                    except KeyError:
-                        pools[pool_id] = []
-                    pools[pool_id] += [metadata]
+
+                # # Process pool data
+                # for pool in post.pools:
+                #     if pool.id in pools:
+                #         pools[pool.id].posts.append(post)
+                #     else:
+                #         pools[pool.id] = pool
 
                 # Process tag category data
-                new_tag_categories = metadata.get("tag_category_map", {})
-                tag_categories = {**tag_categories, **new_tag_categories}
+                for tag in post.tags:
+                    if tag in tags:
+                        continue
+                    tags.append(tag)
 
             if posts_to_download:
                 logger.info(f"Downloading {len(posts_to_download)} posts")
-                post_urls = [metadata["post_url"] for metadata in posts_to_download]
+                post_urls = [post.post_url for post in posts_to_download]
                 gallery_dl.download_urls(urls=post_urls, download_folder=download_folder)
+                for post in posts_to_download:
+                    post.local_file = self.get_media_file(metadata=post.metadata)
 
-            try:
-                self.upload_posts(metadata_list=posts_to_download)
-            except Exception as e:
-                logger.critical(f"Post upload failed due to {e}")
+            self.upload_posts(posts=posts)
+            # try:
+            #     self.upload_posts(posts=posts_to_download)
+            # except Exception as e:
+            #     logger.critical(f"Post upload failed due to {e}")
             
             logger.debug(f"Deleting '{download_folder}' folder")
             shutil.rmtree(download_folder)
 
-        self.update_tag_categories(tag_categories=tag_categories)
-        self.update_pools(pools=pools)
+        self.update_tags(tags=tags)
+        # self.update_pools(pools=pools)
 
-    def check_post_exists(self, metadata:dict) -> int:
+    def check_post_exists(self, post:resources.InternalPost) -> resources.InternalPost:
         """Check if the provided post (see metadata) already exists on the destination booru
 
         Args:
@@ -272,97 +180,50 @@ class BooruTools:
         Returns:
             int: The post ID of the destination post
         """
-        existing_post_id = None
-        domain = urlparse(metadata.get("file_url", "")).hostname
-        category = metadata["category"]
-
-        metadata_plugin = self.find_metadata_plugin(domain=domain, category=category)
-
+        post = None
+        
         destination = self.config["destination"]
-        api_plugin = self.find_api_plugin(domain=destination, category=destination)
+        api_plugin:_template.ApiPlugin = self.api_loader.init_plugin(domain=destination, category=destination)
 
         try:
-            md5 = metadata_plugin.get_md5(metadata=metadata)
-            logger.debug(f"Found md5 in metadata of value '{md5}'")
-            existing_post_id = api_plugin.check_md5_post_exists(md5_hash=md5)
-        except errors.MissingMd5:
-            logger.debug(f"No md5 attribute to check on {metadata.get('id', 'NA')}")
+            if post.post_url:
+                logger.debug(f"Found post_url in metadata of value '{post.post_url}'")
+                sources = [post.post_url]
+                post = api_plugin.check_sources_post_exists(sources=sources)
+        except KeyError:
+            logger.debug(f"No post_url attribute to check on {post.id}")
 
-        if not existing_post_id:
-            try:
-                post_url = metadata["post_url"]
-                logger.debug(f"Found post_url in metadata of value '{post_url}'")
-                sources = [post_url]
-                existing_post_id = api_plugin.check_sources_post_exists(sources=sources)
-            except KeyError:
-                logger.debug(f"No post_url attribute to check on {metadata.get('id', 'NA')}")
-
-        if existing_post_id:
+        if post:
             logger.debug(f"Existing post found on '{destination}'")
 
-        return existing_post_id
+        return post
     
-    def upload_posts(self, metadata_list:list):
-        for metadata in metadata_list:
-            media_file = self.get_media_file(metadata=metadata)
+    def upload_posts(self, posts:list[resources.InternalPost]):
+        for post in posts:
+            if not post.local_file:
+                logger.debug(f"No file to upload for '{post.id}'")
+            else:
+                logger.debug(f"Uploading {post.local_file.name} for '{post.id}'")
 
-            if not media_file:
-                post_id = metadata.get("id", "NA")
-                logger.debug(f"No file to upload for '{post_id}'")
-                continue
-            
-            domain = urlparse(metadata.get("file_url", "")).hostname
-            category = metadata["category"]
-            metadata_plugin = self.find_metadata_plugin(domain=domain, category=category)
-            post = metadata_plugin.create_standard_post(
-                metadata=metadata
-            )
+            if post.post_url:
+                post.sources.append(post.post_url)
 
-            logger.info(f"Starting upload of {media_file.name}")
-            destination = self.config["destination"]
-            api_plugin = self.find_api_plugin(domain=destination, category=destination)
+            destination:str = self.config["destination"]
+            api_plugin:_template.ApiPlugin = self.api_loader.init_plugin(domain=destination, category=destination)
             api_plugin.push_post(
-                file=media_file, 
                 post=post
             )
 
-    def update_tag_categories(self, tag_categories:dict):
+    def update_tags(self, tags:list[resources.InternalTag]):
         destination = self.config["destination"]
-        api_plugin = self.find_api_plugin(domain=destination, category=destination)
+        api_plugin:_template.ApiPlugin = self.api_loader.init_plugin(domain=destination, category=destination)
 
-        tags = tag_categories.keys()
         logger.info(f"Updating {len(tags)} tags")
 
-        for tag, category in tag_categories.items():
-            logger.debug(f"Updating tag '{tag}' to category '{category}'")
+        # for tag in self.implicate_tags(tags):
+        for tag in tags:
+            logger.debug(f"Updating tag '{tag}' to category '{tag.category}'")
             try:
-                api_plugin.push_tag(tag=tag, tag_category=category)
+                api_plugin.push_tag(tag=tag)
             except Exception as e:
                 logger.warning(f"Error updating the tag '{tag}' due to {e}")
-
-    def update_pools(self, pools:dict):
-        destination = self.config["destination"]
-        destination_api_plugin = self.find_api_plugin(domain=destination, category=destination)
-
-        for source_pool_id, metadata_list in pools.items():
-            metadata = metadata_list[0]
-
-            domain = urlparse(metadata.get("file_url", "")).hostname
-            category = metadata["category"]
-
-            api_plugin = self.find_api_plugin(domain=domain, category=category)
-            pool = api_plugin.get_pool(id=source_pool_id)
-            
-            post_ids_ordered = []
-            for post_id in pool.posts:
-                metadata = next((metadata for metadata in metadata_list if metadata['id'] == post_id), None)
-
-                if not metadata:
-                    logger.warning(f"Missing metadata for post ID {post_id} in pool {pool.id}, skipping")
-                    continue
-                
-                destination_post_id = self.check_post_exists(metadata=metadata)
-                post_ids_ordered.append(destination_post_id)
-            
-            pool.posts = post_ids_ordered
-            destination_api_plugin.push_pool(pool=pool)

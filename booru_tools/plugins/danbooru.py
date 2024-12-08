@@ -1,7 +1,8 @@
-from boorus.shared import errors, meta
+from booru_tools.plugins import _template
+from booru_tools.shared import errors
 from loguru import logger
 
-class DanbooruMeta(meta.CommonBooru):
+class DanbooruMeta(_template.MetadataPlugin):
     _DOMAINS = [
         "danbooru.donmai.us"
     ]

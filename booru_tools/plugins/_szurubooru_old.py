@@ -3,10 +3,12 @@ import requests
 
 from pathlib import Path
 import urllib.parse
-from boorus.shared import errors, api_client, base_classes, meta
+from booru_tools.plugins import _template
+from booru_tools.shared import resources
+from booru_tools.shared import errors
 from loguru import logger
 
-@dataclass
+@dataclass(kw_only=True)
 class PagedSearch:
     offset: int
     limit: int
@@ -18,13 +20,7 @@ class PagedSearch:
         resource_string = f"query={self.query}, offset={self.offset}, limit={self.limit}, total={self.total}, results_count={len(self.results)}"
         return resource_string
 
-@dataclass
-class Tag:
-    version: int
-    names: dict
-    category: str = ""
-
-class SzurubooruMeta(meta.CommonBooru):
+class SzurubooruMeta(_template.MetadataPlugin):
     _DOMAINS = []
     _CATEGORY = [
         "szurubooru"
@@ -35,7 +31,7 @@ class SzurubooruMeta(meta.CommonBooru):
         self.url_base = "" # Update this to pull from config
         self.import_config(config=config)
 
-    def generate_post_url(self, metadata:dict) -> str:
+    def get_post_url(self, metadata:dict) -> str:
         post_id = metadata['id']
         url = f"{self.url_base}/post/{post_id}"
         logger.debug(f"Generated the post URL '{url}'")
@@ -45,7 +41,7 @@ class SzurubooruMeta(meta.CommonBooru):
         safety = metadata.get("rating", "safe")
         return safety
 
-class SzurubooruClient(api_client.ApiClient):
+class SzurubooruClient(_template.ApiPlugin):
     _DOMAINS = []
     _CATEGORY = [
         "szurubooru"
@@ -114,6 +110,7 @@ class SzurubooruClient(api_client.ApiClient):
     
     def pool_search(self, search_query:str, search_size:int=100, offset:int=0) -> list:
         url = f"{self.szurubooru_api_url}/pools/"
+        
         params = {
             "offset": offset,
             "limit": search_size,
@@ -158,7 +155,7 @@ class SzurubooruClient(api_client.ApiClient):
         logger.debug(f"Uploaded file to temporary endpoint with token={token}")
         return token
 
-    def create_post(self, content_token:str, post:base_classes.Post) -> dict:
+    def create_post(self, content_token:str, post:resources.InternalPost) -> dict:
         url = f"{self.szurubooru_api_url}/posts/"
 
         data = {
@@ -196,7 +193,7 @@ class SzurubooruClient(api_client.ApiClient):
 
         return image_search
 
-    def push_post(self, file:Path, post:base_classes.Post):
+    def push_post(self, file:Path, post:resources.InternalPost):
         content_token = self.upload_temporary_file(file=file)
         reverse_image_search = self.reverse_image_search(content_token=content_token)
         
@@ -420,11 +417,11 @@ class SzurubooruClient(api_client.ApiClient):
         
         return escaped_string
 
-    def push_pool(self, pool:base_classes.Pool):
+    def push_pool(self, pool:resources.InternalPool):
         """Create/update the provided pool
 
         Args:
-            pool (base_classes.Pool): The pool data to use for the update or creation
+            pool (resources.InternalPool): The pool data to use for the update or creation
 
         Returns:
             _type_: The returned pool data

@@ -1,0 +1,306 @@
+from booru_tools.plugins import _template
+from booru_tools.shared import resources
+from booru_tools.shared import errors
+from loguru import logger
+from datetime import datetime
+from pathlib import Path
+import functools
+import requests
+from bs4 import BeautifulSoup
+import gzip, csv
+
+class SharedAttributes:
+    _DOMAINS = [
+        "e621.net"
+    ]
+    _CATEGORY = [
+        "e621"
+    ]
+    _NAME = "e621"
+
+    POST_CATEGORY_MAP = {
+        "0": "General",
+        "1": "Artist",
+        "3": "Copyright",
+        "4": "Character",
+        "5": "Species",
+        "6": "Invalid",
+        "7": "Meta",
+        "8": "Lore"
+    }
+
+    POST_SAFETY_MAPPING = {
+        "safe": "safe",
+        "s": "safe",
+        "questionable": "sketchy",
+        "q": "sketchy",
+        "explicit": "unsafe",
+        "e": "unsafe"
+    }
+    URL_BASE = "https://e621.net"
+
+class E621Meta(SharedAttributes, _template.MetadataPlugin):
+    def get_id(self, metadata:dict) -> int:
+        id:int = metadata["id"]
+        return id
+
+    def get_sources(self, metadata:dict) -> list[str]:
+        sources = metadata.get("sources", [])
+        return sources
+
+    def get_description(self, metadata:dict) -> str:
+        description = metadata.get("description", "")
+        return description
+
+    def get_tags(self, metadata: dict) -> list[resources.InternalTag]:
+        all_tags:list[resources.InternalTag] = []
+
+        for category, tags in metadata.get("tags", {}).items():
+            for tag in tags:
+                tag = resources.InternalTag(
+                    names=[tag],
+                    category=category
+                )
+                all_tags.append(tag)
+        
+        logger.debug(f"Found {len(all_tags)} tags")
+        return all_tags
+
+    def get_created_at(self, metadata:dict) -> datetime:
+        datetime_str:str = metadata["created_at"]
+        datetime_obj:datetime = datetime.fromisoformat(datetime_str)
+        return datetime_obj
+
+    def get_updated_at(self, metadata:dict) -> datetime:
+        datetime_str:str = metadata["updated_at"]
+        datetime_obj:datetime = datetime.fromisoformat(datetime_str)
+        return datetime_obj
+
+    def get_relations(self, metadata:dict) -> resources.InternalRelationship:
+        post_relationships:dict = metadata["relationships"]
+        parent_id:int = post_relationships.get("parent_id", None)
+        children:dict = post_relationships.get("children", None)
+
+        relationships = resources.InternalRelationship(
+            parent_id=parent_id,
+            children=children
+        )
+
+        return relationships
+
+    def get_safety(self, metadata:dict) -> str:
+        rating:str = metadata["rating"]
+        safety:str = self.POST_SAFETY_MAPPING.get(rating, "sketchy")
+        return safety
+
+    def get_md5(self, metadata: dict) -> str:
+        metadata_file = metadata.get("file", {})
+        try:
+            md5 = metadata_file["md5"]
+        except KeyError:
+            raise errors.MissingMd5
+        
+        logger.debug(f"Found '{md5}' md5")
+        return md5
+
+    def get_post_url(self, metadata:dict) -> str:
+        post_id = metadata["id"]
+        url = f"{self.URL_BASE}/posts/{post_id}"
+        logger.debug(f"Generated the post URL '{url}'")
+        return url
+
+    def get_pools(self, metadata:dict) -> list[resources.InternalPool]:
+        post_pools:list[int] = metadata.get("pools", [])
+        pools:list[resources.InternalPool] = []
+
+        for pool_id in post_pools:
+            pools.append(resources.InternalPool(
+                id=pool_id
+            ))
+        
+        return pools
+
+class E621Client(SharedAttributes, _template.ApiPlugin):
+    def __init__(self, config:dict={}) -> None:
+        logger.debug(f"Loaded {self.__class__.__name__}")
+        self.headers = {
+            "Accept": "application/json",
+            "User-Agent": "booru-tools/1.0"
+        }
+        self.tag_post_count_threshold = 0
+        self.tmp_path = Path("tmp")
+        self.import_config(config=config)
+
+    def get_pool(self, id:int) -> resources.InternalPool:
+        url = f"{self.URL_BASE}/pools.json?search[id]={id}"
+
+        response = requests.get(
+            url=url,
+            headers=self.headers
+        )
+
+        pools = response.json()
+
+        try:
+            pool_data = pools[0]
+            pool = resources.InternalPool(
+                id=pool_data["id"],
+                title=pool_data["name"],
+                category=pool_data.get("category"),
+                description=pool_data.get("description"),
+                posts=pool_data["post_ids"]
+            )
+        except KeyError:
+            pool = None
+
+        return pool
+
+    def get_all_tags(self) -> list[resources.InternalTag]:
+        tag_aliases_export_archive = self._download_latest_db_export(filename_string="tag_aliases-")
+        tag_implications_export_archive = self._download_latest_db_export(filename_string="tag_implications-")
+        tags_export_archive = self._download_latest_db_export(filename_string="tags-")
+
+        tags:dict[str, resources.InternalTag] = {}
+
+        with gzip.open(tags_export_archive, "rt") as tags_gz:
+            tags_csv_reader = csv.DictReader(tags_gz)
+
+            for tag in tags_csv_reader:
+                if tag.get("post_count", 0) <= self.tag_post_count_threshold:
+                    logger.debug(f"Skipping tag '{name}' as its under the post_count threshold of {self.tag_post_count_threshold}")
+                    continue
+
+                name = tag["name"]
+                category_id = tag["category"]
+
+                if category_id == 6:
+                    logger.debug(f"Skipping tag '{name}' as its in the invalid category")
+                    continue
+
+                category = self.POST_CATEGORY_MAP.get(category_id, "")
+
+                tags[name] = resources.InternalTag(
+                    names=[name],
+                    category=category
+                )
+
+        with gzip.open(tag_aliases_export_archive, "rt") as tag_aliases_gz:
+            tag_aliases_csv_reader = csv.DictReader(tag_aliases_gz)
+
+            for tag_alias in tag_aliases_csv_reader:
+                if tag_alias.get("status", "deleted") != "active":
+                    continue
+                name = tag_alias["consequent_name"]
+                alias = tag_alias["antecedent_name"]
+                try:
+                    tags[name].names.append(alias)
+                except KeyError:
+                    logger.debug(f"Skipping alias '{alias}' as the tag '{name}' didn't exist")
+            
+        with gzip.open(tag_implications_export_archive, "rt") as tag_implications_gz:
+            tag_implications_csv_reader = csv.DictReader(tag_implications_gz)
+
+            for tag_implication in tag_implications_csv_reader:
+                if tag_implication.get("status", "deleted") != "active":
+                    continue
+                name = tag_implication["antecedent_name"]
+                implication = tag_implication["consequent_name"]
+                try:
+                    tags[name].implications.append(tags[implication])
+                except KeyError:
+                    logger.debug(f"Skipping implication '{implication}' as the tag '{name}' or '{implication}' didn't exist")
+            
+        return tags.values()
+    
+    def get_all_pools(self) -> list[resources.InternalPool]:
+        pools_export_archive = self._download_latest_db_export(filename_string="pools-")
+
+        pools:list[resources.InternalPool] = []
+
+        with gzip.open(pools_export_archive, "rt") as pools_gz:
+            pools_csv_reader = csv.DictReader(pools_gz)
+
+            for pool in pools_csv_reader:
+                if pool.get("is_active", "f") != "t":
+                    continue
+                
+                pool_data = {
+                    "id": int(pool["id"]),
+                    "name": pool["name"],
+                    "created_at": datetime.fromisoformat(pool["created_at"]),
+                    "updated_at": datetime.fromisoformat(pool["updated_at"]),
+                    "description": pool["description"],
+                    "category": pool["category"]
+                }
+
+                post_ids:list[str] = pool["post_ids"].strip("{}").split(",")
+                pool_data["posts"] = [{"id": post_id} for post_id in post_ids]
+
+                pools.append(resources.InternalPool.from_dict(pool_data))
+            
+        return pools
+    
+    def get_all_posts(self) -> list[resources.InternalPost]:
+        posts_export_archive = self._download_latest_db_export(filename_string="posts-")
+
+        posts:list[resources.InternalPost] = []
+
+        with gzip.open(posts_export_archive, "rt") as posts_gz:
+            posts_csv_reader = csv.DictReader(posts_gz)
+            
+            for post in posts_csv_reader:
+
+                if post.get("is_deleted", "t") != "f":
+                    continue
+                if post.get("is_pending", "t") != "f":
+                    continue
+                if post.get("is_flagged", "t") != "f":
+                    continue
+
+                post_data = {
+                    "id": int(post["id"]),
+                    "created_at": datetime.fromisoformat(post["created_at"]),
+                    "updated_at": datetime.fromisoformat(post["updated_at"]),
+                    "md5": post["md5"],
+                    "source": post["source"].split("\n"),
+                    "rating": self.POST_SAFETY_MAPPING.get(post["rating"], "sketchy"),
+                    "tags": [{"names": [tag]} for tag in post["tag_string"].split(" ")],
+                    "description": post["description"]
+                } 
+
+                posts.append(resources.InternalPost.from_dict(post_data))
+        
+        return posts
+    
+    def _download_latest_db_export(self, filename_string:str) -> Path|None:
+        db_export_links = self._get_db_export_links()
+        db_export_links.sort(key=lambda link: link.split("/")[-1], reverse=True)
+        
+        for link in db_export_links:
+            filename = link.split("/")[-1]
+            if filename_string not in filename:
+                continue
+
+            response = requests.get(link)
+            local_file = self.create_tmp_directory() / filename
+
+            with open(local_file, "wb") as file:
+                file.write(response.content)
+
+            logger.debug(f"Downloaded db export '{filename}'")
+
+            return local_file
+        return None
+
+    @functools.cache
+    def _get_db_export_links(self) -> list[str]:
+        url = "https://e621.net/db_export/"
+        export_file_extension = ".csv.gz"
+        
+        response = requests.get(url)
+        soup = BeautifulSoup(response.content, "html.parser")
+        
+        links = soup.find_all("a", href=True)
+        file_links = [url + link["href"] for link in links if link["href"].endswith(export_file_extension)]
+
+        return file_links
