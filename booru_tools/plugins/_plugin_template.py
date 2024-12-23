@@ -3,20 +3,10 @@ from base64 import b64encode
 from datetime import datetime
 from pathlib import Path
 
-from booru_tools.shared import errors
-from booru_tools.shared import resources
+from booru_tools.shared import resources, errors, constants
 from . import _base
 
 class MetadataPlugin(_base.PluginBase):
-    def __init__(self, config:dict={}):
-        logger.debug(f"Loaded {self.__class__.__name__}")
-        self.safety_mapping = {
-            "safe": "safe",
-            "sketchy": "sketchy",
-            "unsafe": "unsafe"
-        }
-        self.import_config(config=config)
-
     def get_id(metadata:dict) -> int:
         raise NotImplementedError
 
@@ -50,11 +40,14 @@ class MetadataPlugin(_base.PluginBase):
     def get_pools(metadata:dict) -> list[resources.InternalPool]:
         raise NotImplementedError
 
+class ValidationPlugin(_base.PluginBase):
+    def get_source_type(self, url:str):
+        return constants.SourceTypes._DEFAULT
+
 class ApiPlugin(_base.PluginBase):
-    def __init__(self, config:dict={}):
+    def __init__(self):
         logger.debug(f"Loaded {self.__class__.__name__}")
         self.tmp_path = Path("tmp")
-        self.import_config(config=config)
 
     @staticmethod
     def encode_auth_headers(user: str, token: str) -> str:

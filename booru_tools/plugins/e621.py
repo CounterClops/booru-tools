@@ -1,6 +1,5 @@
-from booru_tools.plugins import _template
-from booru_tools.shared import resources
-from booru_tools.shared import errors
+from booru_tools.plugins import _plugin_template
+from booru_tools.shared import errors, constants, resources
 from loguru import logger
 from datetime import datetime
 from pathlib import Path
@@ -19,27 +18,31 @@ class SharedAttributes:
     _NAME = "e621"
 
     POST_CATEGORY_MAP = {
-        "0": "General",
-        "1": "Artist",
-        "3": "Copyright",
-        "4": "Character",
-        "5": "Species",
-        "6": "Invalid",
-        "7": "Meta",
-        "8": "Lore"
+        "0": constants.Category.GENERAL,
+        "1": constants.Category.ARTIST,
+        "3": constants.Category.COPYRIGHT,
+        "4": constants.Category.CHARACTER,
+        "5": constants.Category.SPECIES,
+        "6": constants.Category.INVALID,
+        "7": constants.Category.META,
+        "8": constants.Category.LORE
     }
 
     POST_SAFETY_MAPPING = {
-        "safe": "safe",
-        "s": "safe",
-        "questionable": "sketchy",
-        "q": "sketchy",
-        "explicit": "unsafe",
-        "e": "unsafe"
+        "safe": constants.Safety.SAFE,
+        "s": constants.Safety.SAFE,
+        "questionable": constants.Safety.SKETCHY,
+        "q": constants.Safety.SKETCHY,
+        "explicit": constants.Safety.UNSAFE,
+        "e": constants.Safety.UNSAFE
     }
     URL_BASE = "https://e621.net"
+    
+    @property
+    def DEFAULT_POST_SEARCH_URL(self):
+        return f"{self.URL_BASE}/posts?tags="
 
-class E621Meta(SharedAttributes, _template.MetadataPlugin):
+class E621Meta(SharedAttributes, _plugin_template.MetadataPlugin):
     def get_id(self, metadata:dict) -> int:
         id:int = metadata["id"]
         return id
@@ -120,8 +123,8 @@ class E621Meta(SharedAttributes, _template.MetadataPlugin):
         
         return pools
 
-class E621Client(SharedAttributes, _template.ApiPlugin):
-    def __init__(self, config:dict={}) -> None:
+class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
+    def __init__(self) -> None:
         logger.debug(f"Loaded {self.__class__.__name__}")
         self.headers = {
             "Accept": "application/json",
@@ -129,7 +132,6 @@ class E621Client(SharedAttributes, _template.ApiPlugin):
         }
         self.tag_post_count_threshold = 0
         self.tmp_path = Path("tmp")
-        self.import_config(config=config)
 
     def get_pool(self, id:int) -> resources.InternalPool:
         url = f"{self.URL_BASE}/pools.json?search[id]={id}"

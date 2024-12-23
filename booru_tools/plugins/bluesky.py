@@ -5,25 +5,24 @@ from booru_tools.shared import constants
 
 class SharedAttributes:
     _DOMAINS = [
-        "twitter.com",
-        "x.com"
+        "bsky.app"
     ]
     _CATEGORY = [
-        "twitter"
+        "bluesky"
     ]
-    _NAME = "twitter"
+    _NAME = "bluesky"
 
-    URL_BASE = "https://x.com"
+    URL_BASE = "https://bsky.app"
 
     @property
     def DEFAULT_POST_SEARCH_URL(self):
-        return f"{self.URL_BASE}/home"
+        return f"{self.URL_BASE}/search"
     
     POST_CATEGORY_MAP = {}
 
-class TwitterValidator(SharedAttributes, _plugin_template.ValidationPlugin):
-    POST_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z.-]+\/.+\/status\/\d+)|(https:\/\/[a-zA-Z.-]+\/media\/.+)")
-    USER_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z.-]+\/[^/]+\/?$)")
+class BlueskyValidator(SharedAttributes, _plugin_template.ValidationPlugin):
+    POST_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z.-]+\/profile\/.+\/post\/.+)")
+    USER_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z.-]+\/profile\/.+\/?$)")
     GLOBAL_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z.-]+\/?$)")
     
     def get_source_type(self, url:str):

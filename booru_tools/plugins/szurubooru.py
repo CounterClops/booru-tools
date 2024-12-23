@@ -5,8 +5,8 @@ from typing import Optional, Literal, Type, Generic, TypeVar
 from pathlib import Path
 import urllib.parse
 from datetime import datetime
-from booru_tools.plugins import _template
-from booru_tools.shared import resources, errors
+from booru_tools.plugins import _plugin_template
+from booru_tools.shared import resources, errors, constants
 from loguru import logger
 
 @dataclass(kw_only=True)
@@ -160,7 +160,7 @@ class Post(MicroPost):
     creationTime: str
     lastEditTime: str
     safety: Literal["safe", "sketchy", "unsafe"]
-    source: str
+    source: str = ""
     type: Literal["image", "animation", "video", "flash", "youtube"]
     checksum: str
     checksumMD5: str
@@ -191,7 +191,9 @@ class Post(MicroPost):
 
     @property
     def sources(self) -> list[str]:
-        split_sources:list[str] = self.source.split(r"\n")
+        if not self.source:
+            return []
+        split_sources:list[str] = self.source.split("\n")
         sources = [source.strip() for source in split_sources]
         return sources
 
@@ -221,8 +223,7 @@ class Post(MicroPost):
             kwargs["id"] = self.id
         if self.tags:
             kwargs["tags"] = [tag.to_resource() for tag in self.tags]
-        if self.source:
-            kwargs["sources"] = self.sources
+        kwargs["sources"] = self.sources
         if self.creationTime:
             kwargs["created_at"] = datetime.fromisoformat(self.creationTime)
         if self.lastEditTime:
@@ -325,20 +326,24 @@ class ImageSearch(Generic[T], SzurubooruResource):
 
         return cls(**data)
 
-class SzurubooruMeta(_template.MetadataPlugin):
+
+class SharedAttributes:
     _DOMAINS = []
     _CATEGORY = [
         "szurubooru"
     ]
     _NAME = "szurubooru"
 
-    def __init__(self, config:dict={}):
-        self.url_base = "" # Update this to pull from config
-        self.import_config(config=config)
+    URL_BASE = ""
+    
+    @property
+    def DEFAULT_POST_SEARCH_URL(self):
+        return f"{self.URL_BASE}/posts"
 
+class SzurubooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
     def get_post_url(self, metadata:dict) -> str:
         post_id = metadata["id"]
-        url = f"{self.url_base}/post/{post_id}"
+        url = f"{self.URL_BASE}/post/{post_id}"
         logger.debug(f"Generated the post URL '{url}'")
         return url
     
@@ -346,24 +351,20 @@ class SzurubooruMeta(_template.MetadataPlugin):
         safety = metadata.get("rating", "safe")
         return safety
 
-class SzurubooruClient(_template.ApiPlugin):
-    _DOMAINS = []
-    _CATEGORY = [
-        "szurubooru"
-    ]
-    _NAME = "szurubooru"
-
-    def __init__(self, config:dict={}) -> None:
+class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
+    def __init__(self) -> None:
         self.image_distance_threshold = 0.15
-        self.import_config(config=config)
-        logger.debug(f'username = {self.username}')
-        logger.debug(f'url_base = {self.url_base}')
-
-        self.szurubooru_api_url = self.url_base + '/api'
-        logger.debug(f'szurubooru_api_url = {self.szurubooru_api_url}')
-
+        logger.debug(f'url_base = {self.URL_BASE}')
+    
+    @property
+    def token(self):
         token = self.encode_auth_headers(self.username, self.password)
-        self.headers = {"Accept": "application/json", "Authorization": f"Token {token}"}
+        return token
+    
+    @property
+    def headers(self):
+        headers = {"Accept": "application/json", "Authorization": f"Token {self.token}"}
+        return headers
 
     def find_exact_post(self, post:resources.InternalPost) -> resources.InternalPost | None:
         if post.md5:
@@ -378,7 +379,7 @@ class SzurubooruClient(_template.ApiPlugin):
             except IndexError:
                 logger.debug("Post not found with md5")
 
-        for source in post.sources:
+        for source in post.sources_of_type(desired_source_type=constants.SourceTypes.POST):
             search_query = f"source:{source}"
             post_search = self._post_search(
                 search_query=search_query,
@@ -469,8 +470,10 @@ class SzurubooruClient(_template.ApiPlugin):
 
     def push_post(self, post:resources.InternalPost, force_update:bool=False) -> resources.InternalPost:
         if post.local_file:
-            if not post._extra.get("szurubooru", {}).get("content_token"):
+            if not post._extra.get(self._NAME, {}).get("content_token"):
                 similar_posts = self.find_similar_posts(post=post)
+            else:
+                similar_posts = []
 
             if not similar_posts:
                 new_post = self._create_post(post=post)
@@ -513,7 +516,7 @@ class SzurubooruClient(_template.ApiPlugin):
         return escaped_string
 
     def _post_search(self, search_query:str, search_size:int=100, offset:int=0) -> PagedSearch[Post]:
-        url = f"{self.szurubooru_api_url}/posts/"
+        url = f"{self.URL_BASE}/api/posts/"
 
         params = {
             "offset": offset,
@@ -532,7 +535,7 @@ class SzurubooruClient(_template.ApiPlugin):
         return post_search
 
     def _tag_search(self, search_query:str, search_size:int=100, offset:int=0) -> PagedSearch[Tag]:
-        url = f"{self.szurubooru_api_url}/tags/"
+        url = f"{self.URL_BASE}/api/tags/"
         params = {
             "offset": offset,
             "limit": search_size,
@@ -550,7 +553,7 @@ class SzurubooruClient(_template.ApiPlugin):
         return tag_search
 
     def _pool_search(self, search_query:str, search_size:int=100, offset:int=0) -> PagedSearch[Pool]:
-        url = f"{self.szurubooru_api_url}/pools/"
+        url = f"{self.URL_BASE}/api/pools/"
         params = {
             "offset": offset,
             "limit": search_size,
@@ -569,7 +572,7 @@ class SzurubooruClient(_template.ApiPlugin):
 
     def _get_tag(self, tag:str) -> Tag|None:
         safe_tag = urllib.parse.quote(tag)
-        url = f"{self.szurubooru_api_url}/tag/{safe_tag}"
+        url = f"{self.URL_BASE}/api/tag/{safe_tag}"
 
         response = requests.get(
             url=url,
@@ -585,7 +588,7 @@ class SzurubooruClient(_template.ApiPlugin):
         return None
 
     def _create_tag(self, names:list[str], tag_category:str="") -> Tag:
-        url = f"{self.szurubooru_api_url}/tags"
+        url = f"{self.URL_BASE}/api/tags"
 
         data = {
             "names": names,
@@ -603,7 +606,7 @@ class SzurubooruClient(_template.ApiPlugin):
         return tag
 
     def _update_tag(self, version_id:int, names:list[str], tag_category:str="") -> Tag:
-        url = f"{self.szurubooru_api_url}/tag/{names[0]}"
+        url = f"{self.URL_BASE}/api/tag/{names[0]}"
 
         data = {
             "version": version_id,
@@ -622,7 +625,7 @@ class SzurubooruClient(_template.ApiPlugin):
         return tag
 
     def _create_post(self, post:resources.InternalPost) -> Post:
-        url = f"{self.szurubooru_api_url}/posts/"
+        url = f"{self.URL_BASE}/api/posts/"
 
         data = {
             "tags": post.str_tags,
@@ -642,7 +645,7 @@ class SzurubooruClient(_template.ApiPlugin):
         return post
 
     def _update_post(self, original_post:resources.InternalPost, new_post:resources.InternalPost) -> Post:
-        url = f"{self.szurubooru_api_url}/post/{original_post.id}"
+        url = f"{self.URL_BASE}/api/post/{original_post.id}"
 
         data = {
             "version": original_post._extra[self._NAME]["version"],
@@ -674,7 +677,7 @@ class SzurubooruClient(_template.ApiPlugin):
         Returns:
             token (str): The content token to be used for referencing the temporary file
         """
-        url = f"{self.szurubooru_api_url}/uploads"
+        url = f"{self.URL_BASE}/api/uploads"
 
         with open(file, "rb") as file_content:
             files = {"content": (file.name, file_content)}
@@ -691,7 +694,7 @@ class SzurubooruClient(_template.ApiPlugin):
 
     def _reverse_image_search(self, content_token:str) -> ImageSearch[Post]:
         logger.debug("Doing reverse image search")
-        url = f"{self.szurubooru_api_url}/posts/reverse-search"
+        url = f"{self.URL_BASE}/api/posts/reverse-search"
 
         data = {
             "contentToken": content_token

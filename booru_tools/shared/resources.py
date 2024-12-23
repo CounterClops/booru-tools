@@ -1,20 +1,41 @@
-from dataclasses import dataclass, field, fields, MISSING
+from dataclasses import dataclass, field, fields, MISSING, InitVar
 from datetime import datetime
 from typing import Optional, Any
-from booru_tools.plugins._base import PluginBase
 from pathlib import Path
 from collections import defaultdict
 from copy import deepcopy
+from urllib.parse import urlparse
+from loguru import logger
+
+from booru_tools.plugins._base import PluginBase
+from booru_tools.shared import constants
+
+class UniqueList(list):
+    def append(self, item):
+        if item not in self:
+            super().append(item)
+
+    def extend(self, items):
+        for item in items:
+            self.append(item)
 
 @dataclass(kw_only=True)
 class InternalPlugins:
-    api: Optional[PluginBase] = None
-    meta: Optional[PluginBase] = None
+    api: PluginBase = None # This is the api plugin
+    meta: PluginBase = None # This is the metadata plugin
+    validators: list[PluginBase] = field(default_factory=list)
+
+    def find_matching_validator(self, domain:str) -> PluginBase|None:
+        for validator_plugin in self.validators:
+            validator_domain_matches = any(validator_domain in domain for validator_domain in validator_plugin._DOMAINS)
+            if validator_domain_matches:
+                return validator_plugin
+        return None
 
 @dataclass(kw_only=True)
 class Metadata:
-    data: dict = field(default_factory=dict)
-    file: Optional[Path] = None
+    data: dict = field(default_factory=dict) # This is the raw metadata dict
+    file: Path = None # This is the path to the metadata file the metadata was pulled from
 
     def __getitem__(self, key: str) -> Any:
         return self.data[key]
@@ -31,8 +52,9 @@ def default_extra():
 
 @dataclass(kw_only=True)
 class InternalResource:
-    plugins: Optional[InternalPlugins] = field(default_factory=InternalPlugins)
-    metadata: Optional[Metadata] = field(default_factory=Metadata)
+    origin: Optional[str] = None # This is the origin field of where this resource was pulled from, what source site/plugin was this created from?
+    plugins: Optional[InternalPlugins] = field(default_factory=InternalPlugins) # The plugins object containing the appropriate metadata/api plugins
+    metadata: Optional[Metadata] = field(default_factory=Metadata) # The metadata object containing the raw metadata and file location
     _extra: Optional[defaultdict] = field(default_factory=default_extra) # This is for any extra plugin specific data that the plugin may need to retain for future actions, but doesn't fit into a regular Resource
 
     @classmethod
@@ -41,7 +63,6 @@ class InternalResource:
     
     @classmethod
     def filter_valid_keys(cls, data:dict):
-        # valid_keys = {field.name for field in cls.__dataclass_fields__.values()}
         valid_keys = {field.name for field in fields(cls)}
         filtered_data = {key: value for key, value in data.items() if key in valid_keys}
         return filtered_data
@@ -72,9 +93,9 @@ class InternalResource:
 
 @dataclass(kw_only=True)
 class InternalTag(InternalResource):
-    names: list[str]
-    category: Optional[str] = ""
-    implications: Optional[list["InternalTag"]] = field(default_factory=list)
+    names: list[str] # The list of names for this tag
+    category: Optional[str] = "" # The tag category string
+    implications: Optional[list["InternalTag"]] = field(default_factory=list) # A list of all tags this specific tag implies.
 
     def __eq__(self, other):
         if isinstance(other, InternalTag):
@@ -87,7 +108,13 @@ class InternalTag(InternalResource):
         return self.names[0]
 
     def __repr__(self):
-        return f"Tag(name={self.names}, category={self.category}, implications={self.implications})"
+        return f"InternalTag(name={self.names}, category={self.category}, implications={self.implications})"
+    
+    def all_tag_strings(self) -> list[str]:
+        tag_strings = set(self.names)
+        for tag in self.implications:
+            tag_strings.update(tag.names)
+        return list(tag_strings)
     
     @classmethod
     def from_dict(cls, data: dict) -> "InternalTag":
@@ -116,11 +143,11 @@ class InternalPost(InternalResource):
     category: Optional[str] = ""
     description: Optional[str] = ""
     tags: Optional[list[InternalTag]] = field(default_factory=list)
-    sources: Optional[list[str]] = field(default_factory=list)
+    sources: InitVar[list[str]] = field(default_factory=UniqueList)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     relations: Optional[InternalRelationship] = field(default_factory=InternalRelationship)
-    safety: Optional[str] = "safe"
+    safety: Optional[str] = constants.Safety._DEFAULT
     sha1: Optional[str] = ""
     md5: Optional[str] = ""
     post_url: Optional[str] = ""
@@ -135,6 +162,46 @@ class InternalPost(InternalResource):
         elif isinstance(other, str):
             return self.id == other
         return NotImplementedError
+
+    def __post_init__(self, sources):
+        self.sources = sources
+
+    @property
+    def sources(self) -> list:
+        return self._sources
+
+    @sources.setter
+    def sources(self, value):
+        self._sources = UniqueList(set(value))
+
+    def sources_of_type(self, desired_source_type:str) -> list[str]:
+        found_sources = []
+        for source in self.sources:
+            source_domain = urlparse(url=source).hostname
+            validator_plugin = self.plugins.find_matching_validator(domain=source_domain)
+
+            if not validator_plugin:
+                continue
+
+            source_type = validator_plugin.get_source_type(url=source)
+            if source_type == desired_source_type:
+                found_sources.append(source)
+        
+        return found_sources
+    
+    def contains_any_tags(self, tags:list[str|InternalTag]) -> bool:
+        post_tags = set(self.str_tags)
+        for tag in tags:
+            if isinstance(tag, str):
+                if tag in post_tags:
+                    logger.debug(f"Post '{self.id}' contains tags from {tags}")
+                    return True
+            elif isinstance(tag, InternalTag):
+                tag_strings = set(tag.all_tag_strings())
+                if post_tags.intersection(tag_strings):
+                    logger.debug(f"Post '{self.id}' contains tags from {tags}")
+                    return True
+        return False
     
     @property
     def str_tags(self) -> list[str]:
@@ -143,7 +210,6 @@ class InternalPost(InternalResource):
             names = set(tag.names)
             tag_strings.update(names)
         return list(tag_strings)
-
     
     @classmethod
     def from_dict(cls, data: dict) -> "InternalPost":

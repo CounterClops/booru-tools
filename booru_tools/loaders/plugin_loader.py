@@ -8,7 +8,6 @@ from loguru import logger
 from booru_tools.plugins import _base
 from booru_tools.shared import errors
 
-
 @dataclass(kw_only=True)
 class InternalPlugin:
     name: str
@@ -21,9 +20,17 @@ class InternalPlugin:
     def __call__(self, *args, **kwargs):
         logger.debug(f"Calling '{self}'")
         return self.obj(*args, **kwargs)
+    
+    def __eq__(self, other):
+        if isinstance(other, InternalPlugin):
+            return self == other
+        return False
+    
+    def __hash__(self):
+        return hash(f"{self.module_name}.{self.name}")
 
 class PluginLoader:
-    def __init__(self, plugin_class: type):
+    def __init__(self, plugin_class: _base.PluginBase):
         self.plugins:list[InternalPlugin] = []
         self.plugin_class:_base.PluginBase = plugin_class
         self.plugin_configs:dict[str, dict] = {
@@ -35,7 +42,7 @@ class PluginLoader:
         }
 
     # Function to load all plugins (Python files) in a directory
-    def load_plugins_from_directory(self, directory: Path) -> list[InternalPlugin]:
+    def import_plugins_from_directory(self, directory: Path) -> list[InternalPlugin]:
         """Goes through all python modules in a directory and returns a list of Classes from those modules that match the self.plugin_class
 
         Args:
@@ -82,7 +89,7 @@ class PluginLoader:
             config = {}
         return config
 
-    def find_plugin(self, domain:str="", category:str="") -> InternalPlugin:
+    def find_plugin(self, name:str="", domain:str="", category:str="") -> InternalPlugin:
         """Find plugin that matches the desired service, it will return a plugin if any single condition matches
 
         Args:
@@ -117,22 +124,46 @@ class PluginLoader:
                     return plugin
             except (TypeError, AttributeError):
                 pass
+
+            try:
+                plugin_name = plugin.obj._NAME
+                logger.debug(f"Name search: '{name}' in '{plugin_name}'")
+                if name == plugin_name:
+                    logger.debug(f"Found '{plugin}' with category match")
+                    return plugin
+            except (TypeError, AttributeError):
+                pass
             
         raise errors.NoPluginFound
     
     @functools.cache
-    def init_plugin(self, domain:str="", category:str="") -> _base.PluginBase:
+    def load_matching_plugin(self, name:str="", domain:str="", category:str="") -> _base.PluginBase:
         logger.debug(f"Starting search for {self.plugin_class.__class__.__name__} plugin with domain={domain}, category={category}")
 
         plugin:InternalPlugin = self.find_plugin(
             domain=domain,
-            category=category
+            category=category,
+            name=name
         )
+
+        loaded_plugin = self.initialise_plugin(plugin=plugin)        
+
+        return loaded_plugin
+
+    @functools.cache
+    def load_all_plugins(self) -> list[_base.PluginBase]:
+        all_plugins:list[_base.PluginBase] = [self.initialise_plugin(plugin=plugin) for plugin in self.plugins]
+        return all_plugins
+        
+    @functools.cache
+    def initialise_plugin(self, plugin:InternalPlugin) -> InternalPlugin:
+        initialised_plugin:_base.PluginBase = plugin()
 
         config:dict = self.get_plugin_config(
             plugin_name=plugin.obj._NAME
         )
 
-        initialised_plugin:_base.PluginBase = plugin(config=config)
-
+        for key, value in config.items():
+            setattr(initialised_plugin, key, value)
+        
         return initialised_plugin

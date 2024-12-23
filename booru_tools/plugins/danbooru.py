@@ -1,8 +1,8 @@
-from booru_tools.plugins import _template
-from booru_tools.shared import errors
+from booru_tools.plugins import _plugin_template
+from booru_tools.shared import errors, constants
 from loguru import logger
 
-class DanbooruMeta(_template.MetadataPlugin):
+class SharedAttributes:
     _DOMAINS = [
         "danbooru.donmai.us"
     ]
@@ -11,26 +11,33 @@ class DanbooruMeta(_template.MetadataPlugin):
     ]
     _NAME = "danbooru"
 
+    URL_BASE = "https://danbooru.donmai.us"
+
+    @property
+    def DEFAULT_POST_SEARCH_URL(self):
+        return f"{self.URL_BASE}/posts?tags="
+    
+    POST_CATEGORY_MAP = {
+        "0": constants.Category.GENERAL,
+        "1": constants.Category.ARTIST,
+        "3": constants.Category.COPYRIGHT,
+        "4": constants.Category.CHARACTER,
+        "5": constants.Category.META
+    }
+
+class DanbooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
     def __init__(self):
         logger.debug(f"Loaded {self.__class__.__name__}")
-        self.url_base = "https://danbooru.donmai.us"
-        self.tag_categories = {
-            0: "General",
-            1: "Artist",
-            3: "Copyright",
-            4: "Character",
-            5: "Meta"
-        }
     
     @property
     def allowed_tag_categories(self):
-        categories = self.tag_categories.values()
+        categories = self.POST_CATEGORY_MAP.values()
         return categories
 
     def convert_tag_category(self, tag_category:int) -> str:
         if isinstance(tag_category, int):
             try:
-                return self.tag_categories[tag_category]
+                return self.POST_CATEGORY_MAP[tag_category]
             except KeyError:
                 raise errors.InvalidTagCategory
     
@@ -70,5 +77,5 @@ class DanbooruMeta(_template.MetadataPlugin):
 
     def generate_post_url(self, metadata:dict) -> str:
         post_id = metadata['id']
-        url = f"{self.url_base}/posts/{post_id}"
+        url = f"{self.URL_BASE}/posts/{post_id}"
         return url
