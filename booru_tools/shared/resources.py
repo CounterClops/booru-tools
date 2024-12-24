@@ -27,9 +27,12 @@ class InternalPlugins:
 
     def find_matching_validator(self, domain:str) -> PluginBase|None:
         for validator_plugin in self.validators:
-            validator_domain_matches = any(validator_domain in domain for validator_domain in validator_plugin._DOMAINS)
-            if validator_domain_matches:
-                return validator_plugin
+            try:
+                validator_domain_matches = any(validator_domain in domain for validator_domain in validator_plugin._DOMAINS)
+                if validator_domain_matches:
+                    return validator_plugin
+            except Exception as e:
+                logger.warning(f"Error finding validator plugin for domain '{domain}' due to {e}. Was checking against {validator_plugin._NAME} with ({validator_plugin._DOMAINS})")
         return None
 
 @dataclass(kw_only=True)
@@ -137,6 +140,13 @@ class InternalRelationship:
     parent_id: Optional[int] = None
     children: Optional[list[int]] = field(default_factory=list)
 
+    @property
+    def related_post_ids(self) -> list[int]:
+        related_posts = self.children
+        if self.parent_id:
+            related_posts.append(self.parent_id)
+        return related_posts
+
 @dataclass(kw_only=True)
 class InternalPost(InternalResource):
     id: int
@@ -164,7 +174,31 @@ class InternalPost(InternalResource):
         return NotImplementedError
 
     def __post_init__(self, sources):
+        if not sources:
+            self.sources = []
         self.sources = sources
+
+    def diff(self, post:"InternalPost", fields_to_ignore:list=[]) -> dict:
+        diff = {}
+        ignored_fields = ["plugins", "metadata", "_extra", "relations"] + fields_to_ignore
+        for field in fields(self):
+            if field.name in ignored_fields:
+                continue
+            self_value = getattr(self, field.name)
+            other_value = getattr(post, field.name)
+            if self_value != other_value:
+                if isinstance(self_value, list):
+                    dif_value = [item for item in self_value if item not in other_value]
+                    if not dif_value:
+                        continue
+                elif isinstance(self_value, dict):
+                    dif_value = {key: value for key, value in self_value.items() if value != other_value.get(key)}
+                    if not dif_value:
+                        continue
+                else:
+                    dif_value = self_value
+                diff[field.name] = dif_value
+        return diff
 
     @property
     def sources(self) -> list:
@@ -201,6 +235,22 @@ class InternalPost(InternalResource):
                 if post_tags.intersection(tag_strings):
                     logger.debug(f"Post '{self.id}' contains tags from {tags}")
                     return True
+        return False
+    
+    def contains_all_tags(self, tags:list[str|InternalTag]) -> bool:
+        post_tags = set(self.str_tags)
+        required_tags = set()
+        for tag in tags:
+            if isinstance(tag, InternalTag):
+                tag_strings = set(tag.all_tag_strings())
+                required_tags.update(tag_strings)
+            else:
+                required_tags.add(tag)
+        
+        contains_all_tags =  all(required_tag in post_tags for required_tag in required_tags)
+        if contains_all_tags:
+            logger.debug(f"Post '{self.id}' contains all required tags from {tags}")
+            return True
         return False
     
     @property
