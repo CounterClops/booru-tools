@@ -38,7 +38,8 @@ class BooruTools:
         )
         self.validation_loader.import_plugins_from_directory(directory=self.booru_plugin_directory)
 
-        self.destination_plugin:_plugin_template.ApiPlugin = self.api_loader.load_matching_plugin(domain=self.config["destination"], category=self.config["destination"])
+        if self.config["destination"]:
+            self.destination_plugin:_plugin_template.ApiPlugin = self.api_loader.load_matching_plugin(domain=self.config["destination"], category=self.config["destination"])
     
     def update_posts(self, posts:list[resources.InternalPost]):
         for post in posts:
