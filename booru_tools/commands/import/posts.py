@@ -41,9 +41,11 @@ class ImportPostsCommand():
         
         for download_folder in metadata_downloader:
             posts = self._ingest_folder(folder=download_folder)
+            post_count = len(posts)
+
             self.booru_tools.update_posts(posts=posts)
             self.booru_tools.delete_directory(directory=download_folder)
-            if self._check_download_limit_reached():
+            if self._check_download_limit_reached(post_count=post_count):
                 break
     
     def _ingest_folder(self, folder:Path) -> list[resources.InternalPost]:
@@ -97,7 +99,13 @@ class ImportPostsCommand():
         
         return downloaded_posts
     
-    def _check_download_limit_reached(self):
+    def _check_download_limit_reached(self, post_count:int=0) -> bool:
+        if post_count:
+            less_posts_than_max = post_count < self.download_page_size
+            if less_posts_than_max:
+                logger.info(f"Downloaded {post_count} posts, less than the maximum number of posts ({self.download_page_size}), stopping")
+                return True
+        
         page_count_past_limit = self.blank_download_page_count >= self.allowed_blank_pages
         download_page_limit_disable = self.blank_download_page_count == 0
         if page_count_past_limit and not download_page_limit_disable:
@@ -114,9 +122,9 @@ class ImportPostsCommand():
 @click.option('--blacklisted-tags', type=str, default="", help="A comma seperated list of tags to blacklist")
 @click.option('--match-source/--ignore-source', default=True, help="Whether post source should be used when importing")
 @click.option('--allowed-blank-pages', type=int, default=1, help="Number of pages to download post pages before stopping")
-@click.option('--override-url-base', type=str, help="The URL base for the destination like 'https://danbooru.donmai.us'")
+@click.option('--plugin-override', type=str, help="Provide plugin override values")
 @click.option('--download-page-size', type=int, default=100, help="The number of posts to download per page")
-def cli(destination:str, url:list[str]=[], import_site:str="", urls_file:Path=None, cookies:Path=None, blacklisted_tags:str="", allowed_blank_pages:int=1, match_source:bool=True, override_url_base:str="", download_page_size:int=100):
+def cli(destination:str, url:list[str]=[], import_site:str="", urls_file:Path=None, cookies:Path=None, blacklisted_tags:str="", allowed_blank_pages:int=1, match_source:bool=True, plugin_override:str="", download_page_size:int=100):
     booru_config = {
         "destination": destination
     }
@@ -124,6 +132,12 @@ def cli(destination:str, url:list[str]=[], import_site:str="", urls_file:Path=No
     booru_tools = core.BooruTools(
         config=booru_config
     )
+
+    if plugin_override:
+        override_pairs = plugin_override.split(",")
+        for pair in override_pairs:
+            key, value = pair.split("=")
+            setattr(booru_tools.destination_plugin, key, value)
     
     if import_site:
         for site_name in import_site:
@@ -139,11 +153,8 @@ def cli(destination:str, url:list[str]=[], import_site:str="", urls_file:Path=No
                 url.append(line.strip())
     
     if destination and not booru_tools.destination_plugin.URL_BASE:
-        if override_url_base:
-            url_base = override_url_base            
-        else:
-            url_base:str = click.prompt("The provided plugin has no 'url_base', please provide the url start like 'https://danbooru.donmai.us'", type=str)
-            url_base = url_base.rstrip("/")
+        url_base:str = click.prompt("The provided plugin has no 'url_base', please provide the url start like 'https://danbooru.donmai.us'", type=str)
+        url_base = url_base.rstrip("/")
         booru_tools.destination_plugin.URL_BASE = url_base
 
     blacklisted_tags = blacklisted_tags.split(",")
