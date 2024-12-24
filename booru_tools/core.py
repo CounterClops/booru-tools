@@ -10,9 +10,13 @@ from booru_tools.plugins import _plugin_template
 from booru_tools.shared import errors, resources
 
 class BooruTools:
-    def __init__(self, booru_plugin_directory:Path="plugins", config:dict=defaultdict(dict), tmp_path:str="tmp"):
-        program_path = Path(__file__).parent
-        self.booru_plugin_directory = program_path / Path(booru_plugin_directory)
+    def __init__(self, booru_plugin_directory:Path="", config:dict=defaultdict(dict), tmp_path:str="tmp"):
+        if not booru_plugin_directory:
+            program_path = Path(__file__).parent
+            self.booru_plugin_directory = program_path / Path(booru_plugin_directory)
+        else:
+            self.booru_plugin_directory = Path(booru_plugin_directory)
+        
         self.tmp_directory = Path(tmp_path)
         self.config = config
         self.load_plugins()
