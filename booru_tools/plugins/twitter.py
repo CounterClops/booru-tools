@@ -22,9 +22,9 @@ class SharedAttributes:
     POST_CATEGORY_MAP = {}
 
 class TwitterValidator(SharedAttributes, _plugin_template.ValidationPlugin):
-    POST_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z.-]+\/.+\/status\/\d+)|(https:\/\/[a-zA-Z.-]+\/media\/.+)")
-    USER_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z.-]+\/[^/]+\/?$)")
-    GLOBAL_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z.-]+\/?$)")
+    POST_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z0-9.-]+\/.+\/status\/\d+)|(https:\/\/[a-zA-Z0-9.-]+\/media\/.+)")
+    USER_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z0-9.-]+\/[^/]+\/?$)")
+    GLOBAL_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z0-9.-]+\/?$)")
     
     def get_source_type(self, url:str):
         if self.POST_URL_PATTERN.match(url):

@@ -1,6 +1,7 @@
 from booru_tools.plugins import _plugin_template
 from booru_tools.shared import errors, constants
 from loguru import logger
+import re
 
 class SharedAttributes:
     _DOMAINS = [
@@ -79,3 +80,14 @@ class DanbooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
         post_id = metadata['id']
         url = f"{self.URL_BASE}/posts/{post_id}"
         return url
+
+class DanbooruValidator(SharedAttributes, _plugin_template.ValidationPlugin):
+    POST_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z0-9.-]+\/posts\/.+)|(https:\/\/[a-zA-Z0-9.-]+\/sample\/.+)|(https:\/\/[a-zA-Z0-9.-]+\/original\/.+)")
+    GLOBAL_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z0-9.-]+\/?$)")
+    
+    def get_source_type(self, url:str):
+        if self.POST_URL_PATTERN.match(url):
+            return constants.SourceTypes.POST
+        if self.GLOBAL_URL_PATTERN.match(url):
+            return constants.SourceTypes.GLOBAL
+        return constants.SourceTypes._DEFAULT

@@ -21,9 +21,9 @@ class SharedAttributes:
     POST_CATEGORY_MAP = {}
 
 class BlueskyValidator(SharedAttributes, _plugin_template.ValidationPlugin):
-    POST_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z.-]+\/profile\/.+\/post\/.+)")
-    USER_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z.-]+\/profile\/.+\/?$)")
-    GLOBAL_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z.-]+\/?$)")
+    POST_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z0-9.-]+\/profile\/.+\/post\/.+)")
+    USER_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z0-9.-]+\/profile\/.+\/?$)")
+    GLOBAL_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z0-9.-]+\/?$)")
     
     def get_source_type(self, url:str):
         if self.POST_URL_PATTERN.match(url):

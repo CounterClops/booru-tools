@@ -5,14 +5,15 @@ from booru_tools.shared import constants
 
 class SharedAttributes:
     _DOMAINS = [
-        "patreon.com"
+        "subscribestar.adult",
+        "subscribestar.com"
     ]
     _CATEGORY = [
-        "patreon"
+        "subscribestar"
     ]
-    _NAME = "patreon"
+    _NAME = "subscribestar"
 
-    URL_BASE = "https://www.patreon.com"
+    URL_BASE = "https://subscribestar.com"
 
     @property
     def DEFAULT_POST_SEARCH_URL(self):
@@ -20,9 +21,9 @@ class SharedAttributes:
     
     POST_CATEGORY_MAP = {}
 
-class PatreonValidator(SharedAttributes, _plugin_template.ValidationPlugin):
+class SubscribeStarValidator(SharedAttributes, _plugin_template.ValidationPlugin):
     POST_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z0-9.-]+\/posts\/.+)")
-    USER_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z0-9.-]+\/c\/.+\/?)")
+    USER_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z0-9.-]+\/[^/]+\/?$)")
     GLOBAL_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z0-9.-]+\/?$)")
     
     def get_source_type(self, url:str):
