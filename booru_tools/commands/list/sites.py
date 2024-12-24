@@ -1,4 +1,3 @@
-# List supported sites for import
 import click
 
 @click.command()
