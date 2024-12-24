@@ -2,6 +2,8 @@ import importlib.util
 import inspect
 from pathlib import Path
 import functools
+import asyncio
+import aiohttp
 
 from dataclasses import dataclass
 from loguru import logger
@@ -30,7 +32,7 @@ class InternalPlugin:
         return hash(f"{self.module_name}.{self.name}")
 
 class PluginLoader:
-    def __init__(self, plugin_class: _base.PluginBase):
+    def __init__(self, plugin_class: _base.PluginBase, session: aiohttp.ClientSession = None):
         self.plugins:list[InternalPlugin] = []
         self.plugin_class:_base.PluginBase = plugin_class
         self.plugin_configs:dict[str, dict] = {
@@ -40,6 +42,7 @@ class PluginLoader:
                 "password": "7dc645f5-b525-43b0-a27b-3362d5e8bb2f"
             }
         }
+        self.session = session
 
     # Function to load all plugins (Python files) in a directory
     def import_plugins_from_directory(self, directory: Path) -> list[InternalPlugin]:
@@ -165,5 +168,8 @@ class PluginLoader:
 
         for key, value in config.items():
             setattr(initialised_plugin, key, value)
+        
+        if self.session:
+            initialised_plugin.session = self.session
         
         return initialised_plugin

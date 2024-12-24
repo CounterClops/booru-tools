@@ -1,13 +1,15 @@
 from dataclasses import dataclass, field, fields
-import requests
-
 from typing import Optional, Literal, Type, Generic, TypeVar
 from pathlib import Path
-import urllib.parse
 from datetime import datetime
+from loguru import logger
+import urllib.parse
+import requests
+import asyncio
+import aiohttp
+
 from booru_tools.plugins import _plugin_template
 from booru_tools.shared import resources, errors, constants
-from loguru import logger
 
 @dataclass(kw_only=True)
 class SzurubooruResource:
@@ -352,7 +354,8 @@ class SzurubooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
         return safety
 
 class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
-    def __init__(self) -> None:
+    def __init__(self, session: aiohttp.ClientSession = None) -> None:
+        self.session = session
         self.image_distance_threshold = 0.15
         logger.debug(f'url_base = {self.URL_BASE}')
     
@@ -366,37 +369,39 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         headers = {"Accept": "application/json", "Authorization": f"Token {self.token}"}
         return headers
 
-    def find_exact_post(self, post:resources.InternalPost) -> resources.InternalPost | None:
+    async def find_exact_post(self, post:resources.InternalPost) -> resources.InternalPost | None:
         if post.md5:
             search_query = f"md5:{post.md5}"
-            post_search = self._post_search(
+            post_search = await self._post_search(
                 search_query=search_query,
                 search_size=1
             )
             try:
-                post:Post = post_search.results[0]
-                return post.to_resource()
+                found_post:Post = post_search.results[0]
+                logger.debug(f"Post found with md5: {found_post.checksumMD5}")
+                return found_post.to_resource()
             except IndexError:
                 logger.debug("Post not found with md5")
 
         for source in post.sources_of_type(desired_source_type=constants.SourceTypes.POST):
             search_query = f"source:{source}"
-            post_search = self._post_search(
+            post_search = await self._post_search(
                 search_query=search_query,
                 search_size=1
             )
             try:
-                post:Post = post_search.results[0]
-                return post.to_resource()
+                found_post:Post = post_search.results[0]
+                logger.debug(f"Post found with source: {source}")
+                return found_post.to_resource()
             except IndexError:
                 logger.debug("Post not found with source link")
         
         return None
     
-    def find_similar_posts(self, post:resources.InternalPost) -> list[resources.InternalPost]:
-        content_token = self._upload_temporary_file(file=post.local_file)
+    async def find_similar_posts(self, post:resources.InternalPost) -> list[resources.InternalPost]:
+        content_token = await self._upload_temporary_file(file=post.local_file)
         post._extra[self._NAME]["content_token"] = content_token
-        image_search = self._reverse_image_search(content_token=content_token)
+        image_search = await self._reverse_image_search(content_token=content_token)
 
         if image_search.exact_post:
             return [image_search.exact_post.to_resource()]
@@ -414,11 +419,11 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         
         return []
     
-    def find_posts_from_tags(self, tags:list[resources.InternalTag]) -> list[resources.InternalPost]:
+    async def find_posts_from_tags(self, tags:list[resources.InternalTag]) -> list[resources.InternalPost]:
         tag_str_list:list[str] = [urllib.parse.quote(str(tag)) for tag in tags]
         search_query = " ".join(tag_str_list)
 
-        post_search = self._post_search(
+        post_search = await self._post_search(
             search_query=search_query
         )
 
@@ -426,28 +431,28 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         return posts
     
-    def find_exact_tag(self, tag:resources.InternalTag) -> resources.InternalTag|None:
+    async def find_exact_tag(self, tag:resources.InternalTag) -> resources.InternalTag|None:
         tag_str_list:list[str] = [urllib.parse.quote(str(tag)) for tag in tag.names]
 
         for tag_str in tag_str_list:
-            found_tag = self._get_tag(tag=tag_str)
+            found_tag = await self._get_tag(tag=tag_str)
             if found_tag:
                 return found_tag
         return None
     
-    def get_all_tags(self) -> list[resources.InternalTag]:
+    async def get_all_tags(self) -> list[resources.InternalTag]:
         raise NotImplementedError
     
-    def get_all_pools(self) -> list[resources.InternalPool]:
+    async def get_all_pools(self) -> list[resources.InternalPool]:
         raise NotImplementedError
 
-    def push_tag(self, tag:resources.InternalTag, force_update:bool=False) -> resources.InternalTag:
+    async def push_tag(self, tag:resources.InternalTag, force_update:bool=False) -> resources.InternalTag:
         tag_name = tag.names[0]
-        destination_tag = self._get_tag(tag=tag_name)
+        destination_tag = await self._get_tag(tag=tag_name)
 
         if not destination_tag:
             logger.info(f"Tag {tag_name} doesn't exist, creating")
-            new_tag = self._create_tag(
+            new_tag = await self._create_tag(
                 names=tag.names,
                 tag_category=tag.category
             )
@@ -460,7 +465,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             return destination_tag.to_resource()
 
         merged_names = list(set(tag.names + destination_tag.names))
-        new_tag = self._update_tag(
+        new_tag = await self._update_tag(
             version_id=destination_tag.version,
             names=merged_names,
             tag_category=tag.category
@@ -468,15 +473,18 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         return new_tag.to_resource()
 
-    def push_post(self, post:resources.InternalPost, force_update:bool=False) -> resources.InternalPost:
+    async def push_post(self, post:resources.InternalPost, force_update:bool=False) -> resources.InternalPost:
         if post.local_file:
             if not post._extra.get(self._NAME, {}).get("content_token"):
-                similar_posts = self.find_similar_posts(post=post)
+                logger.debug("Content token found, doing reverse image search")
+                similar_posts = await self.find_similar_posts(post=post)
             else:
+                logger.debug("Blanking similar posts as there is no content_token")
                 similar_posts = []
 
             if not similar_posts:
-                new_post = self._create_post(post=post)
+                logger.debug("No similar posts found, creating new post")
+                new_post = await self._create_post(post=post)
                 return new_post.to_resource()
 
             min_distance = similar_posts[0]._extra[self._NAME].get("distance", "??")
@@ -487,20 +495,35 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 return None
 
             logger.info(f"{len(similar_posts)} similar posts already exist in range {min_distance}-{max_distance}, updating")
-            new_post = self._update_post(
+            new_post = await self._update_post(
                 original_post=similar_posts[0],
                 new_post=post
             )
             return new_post.to_resource()
         
-        exact_post = self.find_exact_post(post=post)
-        new_post = self._update_post(
-            original_post=exact_post,
-            new_post=post
-        )
-        return new_post.to_resource()
+        logger.debug("No local file found, looking for existing post")
+        exact_post = await self.find_exact_post(post=post)
+        logger.debug(f"Updating post with id={exact_post.id}")
+        ignored_fields = [
+            "id",
+            "category",
+            "created_at",
+            "updated_at",
+            "sha1",
+            "post_url",
+            "description",
+        ]
+        changes = post.diff(post=exact_post, fields_to_ignore=ignored_fields)
+        if changes:
+            logger.debug(f"Changes found in post: {changes}")
+            new_post = await self._update_post(
+                original_post=exact_post,
+                new_post=post
+            )
+            return new_post.to_resource()
+        return exact_post
 
-    def push_pool(self, pool:resources.InternalPool, force_update:bool=False) -> resources.InternalPool:
+    async def push_pool(self, pool:resources.InternalPool, force_update:bool=False) -> resources.InternalPool:
         raise NotImplementedError
 
     def _escape_string(self, string:str) -> str:
@@ -515,7 +538,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         
         return escaped_string
 
-    def _post_search(self, search_query:str, search_size:int=100, offset:int=0) -> PagedSearch[Post]:
+    async def _post_search(self, search_query:str, search_size:int=100, offset:int=0) -> PagedSearch[Post]:
         url = f"{self.URL_BASE}/api/posts/"
 
         params = {
@@ -524,17 +547,18 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             "query": search_query
         }
 
-        response = requests.get(
-            url=url,
-            headers=self.headers,
-            params=params
-        )
+        async with self.session.get(
+                url=url,
+                headers=self.headers,
+                params=params
+            ) as response:
+            response_json = await response.json()
 
-        post_search:PagedSearch[Post] = PagedSearch.from_dict(data=response.json(), resource_type=Post)
+        post_search:PagedSearch[Post] = PagedSearch.from_dict(data=response_json, resource_type=Post)
 
         return post_search
 
-    def _tag_search(self, search_query:str, search_size:int=100, offset:int=0) -> PagedSearch[Tag]:
+    async def _tag_search(self, search_query:str, search_size:int=100, offset:int=0) -> PagedSearch[Tag]:
         url = f"{self.URL_BASE}/api/tags/"
         params = {
             "offset": offset,
@@ -542,17 +566,18 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             "query": search_query
         }
 
-        response = requests.get(
-            url=url,
-            headers=self.headers,
-            params=params
-        )
+        async with self.session.get(
+                url=url,
+                headers=self.headers,
+                params=params
+            ) as response:
+            response_json = await response.json()
 
-        tag_search:PagedSearch[Tag] = PagedSearch.from_dict(data=response.json(), resource_type=Tag)
+        tag_search:PagedSearch[Tag] = PagedSearch.from_dict(data=response_json, resource_type=Tag)
 
         return tag_search
 
-    def _pool_search(self, search_query:str, search_size:int=100, offset:int=0) -> PagedSearch[Pool]:
+    async def _pool_search(self, search_query:str, search_size:int=100, offset:int=0) -> PagedSearch[Pool]:
         url = f"{self.URL_BASE}/api/pools/"
         params = {
             "offset": offset,
@@ -560,26 +585,26 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             "query": search_query
         }
 
-        response = requests.get(
-            url=url,
-            headers=self.headers,
-            params=params
-        )
+        async with self.session.get(
+                url=url,
+                headers=self.headers,
+                params=params
+            ) as response:
+            response_json = await response.json()
 
-        pool_search:PagedSearch[Pool] = PagedSearch.from_dict(data=response.json(), resource_type=Pool)
+        pool_search:PagedSearch[Pool] = PagedSearch.from_dict(data=response_json, resource_type=Pool)
         
         return pool_search
 
-    def _get_tag(self, tag:str) -> Tag|None:
+    async def _get_tag(self, tag:str) -> Tag|None:
         safe_tag = urllib.parse.quote(tag)
         url = f"{self.URL_BASE}/api/tag/{safe_tag}"
 
-        response = requests.get(
-            url=url,
-            headers=self.headers
-        )
-
-        response_json = response.json()
+        async with self.session.get(
+                url=url,
+                headers=self.headers,
+            ) as response:
+            response_json = await response.json()
 
         if response_json:
             tag = Tag.from_dict(response_json)
@@ -587,7 +612,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         
         return None
 
-    def _create_tag(self, names:list[str], tag_category:str="") -> Tag:
+    async def _create_tag(self, names:list[str], tag_category:str="") -> Tag:
         url = f"{self.URL_BASE}/api/tags"
 
         data = {
@@ -595,17 +620,18 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             "category": tag_category
         }
 
-        response = requests.post(
-            url=url,
-            json=data,
-            headers=self.headers
-        )
-
-        tag = Tag.from_dict(response.json())
+        async with self.session.post(
+                url=url,
+                headers=self.headers,
+                json=data
+            ) as response:
+            response_json = await response.json()
+        
+        tag = Tag.from_dict(response_json)
 
         return tag
 
-    def _update_tag(self, version_id:int, names:list[str], tag_category:str="") -> Tag:
+    async def _update_tag(self, version_id:int, names:list[str], tag_category:str="") -> Tag:
         url = f"{self.URL_BASE}/api/tag/{names[0]}"
 
         data = {
@@ -614,17 +640,18 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             "names": names
         }
 
-        response = requests.put(
-            url=url,
-            json=data,
-            headers=self.headers
-        )
+        async with self.session.put(
+                url=url,
+                headers=self.headers,
+                json=data
+            ) as response:
+            response_json = await response.json()
 
-        tag = Tag.from_dict(response.json())
+        tag = Tag.from_dict(response_json)
 
         return tag
 
-    def _create_post(self, post:resources.InternalPost) -> Post:
+    async def _create_post(self, post:resources.InternalPost) -> Post:
         url = f"{self.URL_BASE}/api/posts/"
 
         data = {
@@ -634,17 +661,18 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             "contentToken": post._extra[self._NAME]["content_token"]
         }
 
-        response = requests.post(
-            url=url,
-            json=data,
-            headers=self.headers
-        )
+        async with self.session.post(
+                url=url,
+                headers=self.headers,
+                json=data
+            ) as response:
+            response_json = await response.json()
 
-        post = Post.from_dict(response.json())
+        post = Post.from_dict(response_json)
 
         return post
 
-    def _update_post(self, original_post:resources.InternalPost, new_post:resources.InternalPost) -> Post:
+    async def _update_post(self, original_post:resources.InternalPost, new_post:resources.InternalPost) -> Post:
         url = f"{self.URL_BASE}/api/post/{original_post.id}"
 
         data = {
@@ -658,17 +686,18 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         if content_token:
             data["contentToken"] = content_token
 
-        response = requests.put(
-            url=url,
-            json=data,
-            headers=self.headers
-        )
+        async with self.session.put(
+                url=url,
+                headers=self.headers,
+                json=data
+            ) as response:
+            response_json = await response.json()
 
-        post = Post.from_dict(response.json())
+        post = Post.from_dict(response_json)
 
         return post
 
-    def _upload_temporary_file(self, file:Path) -> str:
+    async def _upload_temporary_file(self, file:Path) -> str:
         """Upload the provided file to the Szurubooru temporary upload endpoint
 
         Args:
@@ -680,19 +709,22 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         url = f"{self.URL_BASE}/api/uploads"
 
         with open(file, "rb") as file_content:
-            files = {"content": (file.name, file_content)}
-            response = requests.post(
-                url=url, 
-                files=files,
-                headers=self.headers
-            )
+            form = aiohttp.FormData()
+            form.add_field("content", file_content, filename=file.name)
 
-        token:str = response.json()["token"]
+            async with self.session.post(
+                    url=url,
+                    headers=self.headers,
+                    data=form
+                ) as response:
+                response_json = await response.json()
+
+        token:str = response_json["token"]
         
         logger.debug(f"Uploaded file to temporary endpoint with token={token}")
         return token
 
-    def _reverse_image_search(self, content_token:str) -> ImageSearch[Post]:
+    async def _reverse_image_search(self, content_token:str) -> ImageSearch[Post]:
         logger.debug("Doing reverse image search")
         url = f"{self.URL_BASE}/api/posts/reverse-search"
 
@@ -700,12 +732,13 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             "contentToken": content_token
         }
 
-        response = requests.post(
-            url=url,
-            json=data,
-            headers=self.headers
-        )
+        async with self.session.post(
+                url=url,
+                headers=self.headers,
+                json=data
+            ) as response:
+            response_json = await response.json()
 
-        image_search:ImageSearch[Post] = ImageSearch.from_dict(data=response.json())
+        image_search:ImageSearch[Post] = ImageSearch.from_dict(data=response_json)
 
         return image_search

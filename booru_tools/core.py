@@ -5,9 +5,31 @@ from collections import defaultdict
 import json
 import shutil
 
+import asyncio
+import aiohttp
+import aiofiles
+import signal
+
 from booru_tools.loaders import plugin_loader
 from booru_tools.plugins import _plugin_template
 from booru_tools.shared import errors, resources
+
+class GracefulExit(SystemExit):
+    code = 1
+
+class SessionManager:
+    def __init__(self):
+        self.session = None
+
+    def start(self) -> aiohttp.ClientSession:
+        if not self.session or self.session.closed:
+            self.session = aiohttp.ClientSession()
+        return self.session
+
+    async def close(self):
+        if self.session:
+            logger.debug("Closing aiohttp session")
+            await self.session.close()
 
 class BooruTools:
     def __init__(self, booru_plugin_directory:Path="", config:dict=defaultdict(dict), tmp_path:str="tmp"):
@@ -19,7 +41,25 @@ class BooruTools:
         
         self.tmp_directory = Path(tmp_path)
         self.config = config
+        self.session_manager = SessionManager()
+
+        signal.signal(signal.SIGINT, self.raise_graceful_exit)
+        signal.signal(signal.SIGTERM, self.raise_graceful_exit)
+
+        try:
+            self.session_manager.start()
+        except RuntimeError as e:
+            logger.debug(f"Error starting session due to {e}")
         self.load_plugins()
+
+    def raise_graceful_exit(self, *args):
+        try:
+            loop = asyncio.get_event_loop()
+            loop.stop()
+        except RuntimeError:
+            logger.debug("No async loop")
+        logger.info("Gracefully shutdown")
+        raise GracefulExit()
     
     # def setup_logger(self) -> None:
     #     logger.configure()
@@ -33,7 +73,8 @@ class BooruTools:
         self.metadata_loader.import_plugins_from_directory(directory=self.booru_plugin_directory)
 
         self.api_loader = plugin_loader.PluginLoader(
-            plugin_class=_plugin_template.ApiPlugin
+            plugin_class=_plugin_template.ApiPlugin,
+            session=self.session_manager.session
         )
         self.api_loader.import_plugins_from_directory(directory=self.booru_plugin_directory)
 
@@ -45,7 +86,7 @@ class BooruTools:
         if self.config["destination"]:
             self.destination_plugin:_plugin_template.ApiPlugin = self.api_loader.load_matching_plugin(domain=self.config["destination"], category=self.config["destination"])
     
-    def update_posts(self, posts:list[resources.InternalPost]):
+    async def update_posts(self, posts:list[resources.InternalPost]):
         for post in posts:
             if not post.local_file:
                 logger.debug(f"No file to upload for '{post.id}'")
@@ -53,20 +94,22 @@ class BooruTools:
                 logger.debug(f"Uploading {post.local_file.name} for '{post.id}'")
 
             if post.post_url:
+                logger.debug(f"Updating post ({post.id}) sources with '{post.post_url}'")
                 post.sources.append(post.post_url)
 
-            self.destination_plugin.push_post(
+            logger.debug(f"Updating post '{post.id}'")
+            await self.destination_plugin.push_post(
                 post=post
             )
 
-    def update_tags(self, tags:list[resources.InternalTag]):
+    async def update_tags(self, tags:list[resources.InternalTag]):
         logger.info(f"Updating {len(tags)} tags")
 
         # for tag in self.implicate_tags(tags):
         for tag in tags:
             logger.debug(f"Updating tag '{tag}' to category '{tag.category}'")
             try:
-                self.destination_plugin.push_tag(tag=tag)
+                await self.destination_plugin.push_tag(tag=tag)
             except Exception as e:
                 logger.warning(f"Error updating the tag '{tag}' due to {e}")
 

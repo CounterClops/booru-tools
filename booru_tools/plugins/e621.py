@@ -7,6 +7,8 @@ import functools
 import requests
 from bs4 import BeautifulSoup
 import gzip, csv
+import aiohttp
+import re
 
 class SharedAttributes:
     _DOMAINS = [
@@ -124,7 +126,8 @@ class E621Meta(SharedAttributes, _plugin_template.MetadataPlugin):
         return pools
 
 class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
-    def __init__(self) -> None:
+    def __init__(self, session: aiohttp.ClientSession = None) -> None:
+        self.session = session
         logger.debug(f"Loaded {self.__class__.__name__}")
         self.headers = {
             "Accept": "application/json",
@@ -133,7 +136,7 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
         self.tag_post_count_threshold = 0
         self.tmp_path = Path("tmp")
 
-    def get_pool(self, id:int) -> resources.InternalPool:
+    async def get_pool(self, id:int) -> resources.InternalPool:
         url = f"{self.URL_BASE}/pools.json?search[id]={id}"
 
         response = requests.get(
@@ -157,10 +160,10 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
 
         return pool
 
-    def get_all_tags(self) -> list[resources.InternalTag]:
-        tag_aliases_export_archive = self._download_latest_db_export(filename_string="tag_aliases-")
-        tag_implications_export_archive = self._download_latest_db_export(filename_string="tag_implications-")
-        tags_export_archive = self._download_latest_db_export(filename_string="tags-")
+    async def get_all_tags(self) -> list[resources.InternalTag]:
+        tag_aliases_export_archive = await self._download_latest_db_export(filename_string="tag_aliases-")
+        tag_implications_export_archive = await self._download_latest_db_export(filename_string="tag_implications-")
+        tags_export_archive = await self._download_latest_db_export(filename_string="tags-")
 
         tags:dict[str, resources.InternalTag] = {}
 
@@ -214,8 +217,8 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
             
         return tags.values()
     
-    def get_all_pools(self) -> list[resources.InternalPool]:
-        pools_export_archive = self._download_latest_db_export(filename_string="pools-")
+    async def get_all_pools(self) -> list[resources.InternalPool]:
+        pools_export_archive = await self._download_latest_db_export(filename_string="pools-")
 
         pools:list[resources.InternalPool] = []
 
@@ -242,8 +245,8 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
             
         return pools
     
-    def get_all_posts(self) -> list[resources.InternalPost]:
-        posts_export_archive = self._download_latest_db_export(filename_string="posts-")
+    async def get_all_posts(self) -> list[resources.InternalPost]:
+        posts_export_archive = await self._download_latest_db_export(filename_string="posts-")
 
         posts:list[resources.InternalPost] = []
 
@@ -274,7 +277,7 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
         
         return posts
     
-    def _download_latest_db_export(self, filename_string:str) -> Path|None:
+    async def _download_latest_db_export(self, filename_string:str) -> Path|None:
         db_export_links = self._get_db_export_links()
         db_export_links.sort(key=lambda link: link.split("/")[-1], reverse=True)
         
@@ -294,7 +297,7 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
             return local_file
         return None
 
-    @functools.cache
+    @functools.cache # Need to look into using https://pypi.org/project/async-lru/ https://github.com/aio-libs/async-lru
     def _get_db_export_links(self) -> list[str]:
         url = "https://e621.net/db_export/"
         export_file_extension = ".csv.gz"
@@ -306,3 +309,14 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
         file_links = [url + link["href"] for link in links if link["href"].endswith(export_file_extension)]
 
         return file_links
+
+class E621Validator(SharedAttributes, _plugin_template.ValidationPlugin):
+    POST_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z0-9.-]+\/posts\/.+)|(https:\/\/[a-zA-Z0-9.-]+\/data\/sample\/.+)")
+    GLOBAL_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z0-9.-]+\/?$)")
+    
+    def get_source_type(self, url:str):
+        if self.POST_URL_PATTERN.match(url):
+            return constants.SourceTypes.POST
+        if self.GLOBAL_URL_PATTERN.match(url):
+            return constants.SourceTypes.GLOBAL
+        return constants.SourceTypes._DEFAULT
