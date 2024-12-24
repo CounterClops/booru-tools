@@ -13,7 +13,7 @@ class BooruTools:
     def __init__(self, booru_plugin_directory:Path="", config:dict=defaultdict(dict), tmp_path:str="tmp"):
         if not booru_plugin_directory:
             program_path = Path(__file__).parent
-            self.booru_plugin_directory = program_path / Path(booru_plugin_directory)
+            self.booru_plugin_directory = program_path / Path("plugins")
         else:
             self.booru_plugin_directory = Path(booru_plugin_directory)
         
