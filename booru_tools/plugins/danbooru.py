@@ -1,7 +1,9 @@
-from booru_tools.plugins import _plugin_template
-from booru_tools.shared import errors, constants
 from loguru import logger
 import re
+from datetime import datetime
+
+from booru_tools.plugins import _plugin_template
+from booru_tools.shared import errors, constants, resources
 
 class SharedAttributes:
     _DOMAINS = [
@@ -26,60 +28,84 @@ class SharedAttributes:
         "5": constants.Category.META
     }
 
+    POST_SAFETY_MAPPING = {
+        "safe": constants.Safety.SAFE,
+        "s": constants.Safety.SAFE,
+        "questionable": constants.Safety.SKETCHY,
+        "q": constants.Safety.SKETCHY,
+        "explicit": constants.Safety.UNSAFE,
+        "e": constants.Safety.UNSAFE
+    }
+
 class DanbooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
     def __init__(self):
         logger.debug(f"Loaded {self.__class__.__name__}")
-    
-    @property
-    def allowed_tag_categories(self):
-        categories = self.POST_CATEGORY_MAP.values()
-        return categories
 
-    def convert_tag_category(self, tag_category:int) -> str:
-        if isinstance(tag_category, int):
-            try:
-                return self.POST_CATEGORY_MAP[tag_category]
-            except KeyError:
-                raise errors.InvalidTagCategory
-    
-    def validate_tag_category(self, tag_category) -> str:
-        """Validate that the tag category is allowed
+    def get_id(self, metadata:dict) -> int:
+        id:int = metadata['id']
+        return id
 
-        Args:
-            tag_category (Any): The tag category you'd like to validate
+    def get_sources(self, metadata:dict) -> list[str]:
+        source:int = metadata.get("source", "")
+        if not source:
+            sources:list = []
+        else:
+            sources:list = [source]
+        return sources
 
-        Raises:
-            errors.InvalidTagCategory: The tag category is invalid
+    def get_description(self, metadata:dict) -> str:
+        description:str = metadata.get("description", "")
+        return description
 
-        Returns:
-            str: The valid tag category
-        """
-        if tag_category in self.allowed_tag_categories:
-            return tag_category
-        raise errors.InvalidTagCategory
+    def get_tags(self, metadata:dict[str, any]) -> list[resources.InternalTag]:
+        all_tags:list[resources.InternalTag] = []
 
-    def add_tag_category_map(self, metadata: dict) -> dict:
-        tag_category_map = {}
-        for key in metadata.keys():
-            if "tags_" not in key:
+        for key, value in metadata.items():
+            if not key.startswith("tags_"):
                 continue
-            
+            if not value:
+                continue
+            logger.debug(f"Found tag string {key}")
             category = key.replace("tags_", "")
-            try:
-                category = self.validate_tag_category(category)
-            except errors.InvalidTagCategory:
-                continue
-
-            for tag in metadata[key]:
-                tag_category_map[tag] = category
+            for tag in value:
+                tag = resources.InternalTag(
+                    names=[tag],
+                    category=category
+                )
+                all_tags.append(tag)
         
-        metadata['tag_category_map'] = tag_category_map
-        return metadata
+        logger.debug(f"Found {len(all_tags)} tags")
+        return all_tags
 
-    def generate_post_url(self, metadata:dict) -> str:
-        post_id = metadata['id']
+    def get_created_at(self, metadata:dict) -> datetime:
+        datetime_str:str = metadata["created_at"]
+        datetime_obj:datetime = datetime.fromisoformat(datetime_str)
+        return datetime_obj
+
+    def get_updated_at(self, metadata:dict) -> datetime:
+        datetime_str:str = metadata["updated_at"]
+        datetime_obj:datetime = datetime.fromisoformat(datetime_str)
+        return datetime_obj
+
+    def get_relations(self, metadata:dict) -> resources.InternalRelationship:
+        return resources.InternalRelationship()
+
+    def get_safety(self, metadata:dict) -> str:
+        rating:str = metadata["rating"]
+        safety:str = self.POST_SAFETY_MAPPING.get(rating, constants.Safety._DEFAULT)
+        return safety
+
+    def get_md5(self, metadata:dict) -> str:
+        md5:str = metadata.get("md5", "")
+        return md5
+
+    def get_post_url(self, metadata:dict) -> str:
+        post_id = self.get_id(metadata=metadata)
         url = f"{self.URL_BASE}/posts/{post_id}"
         return url
+
+    def get_pools(self, metadata:dict) -> list[resources.InternalPool]:
+        return []
 
 class DanbooruValidator(SharedAttributes, _plugin_template.ValidationPlugin):
     POST_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z0-9.-]+\/posts\/.+)|(https:\/\/[a-zA-Z0-9.-]+\/sample\/.+)|(https:\/\/[a-zA-Z0-9.-]+\/original\/.+)")

@@ -10,37 +10,37 @@ from booru_tools.shared import resources, errors, constants
 from booru_tools.plugins import _base
 
 class MetadataPlugin(_base.PluginBase):
-    def get_id(metadata:dict) -> int:
+    def get_id(self, metadata:dict) -> int:
         raise NotImplementedError
 
-    def get_sources(metadata:dict) -> list[str]:
+    def get_sources(self, metadata:dict) -> list[str]:
         raise NotImplementedError
 
-    def get_description(metadata:dict) -> str:
+    def get_description(self, metadata:dict) -> str:
         raise NotImplementedError
 
-    def get_tags(metadata:dict) -> list[resources.InternalTag]:
+    def get_tags(self, metadata:dict) -> list[resources.InternalTag]:
         raise NotImplementedError
 
-    def get_created_at(metadata:dict) -> datetime | None:
+    def get_created_at(self, metadata:dict) -> datetime | None:
         raise NotImplementedError
 
-    def get_updated_at(metadata:dict) -> datetime | None:
+    def get_updated_at(self, metadata:dict) -> datetime | None:
         raise NotImplementedError
 
-    def get_relations(metadata:dict) -> resources.InternalRelationship:
+    def get_relations(self, metadata:dict) -> resources.InternalRelationship:
         raise NotImplementedError
 
-    def get_safety(metadata:dict) -> str:
+    def get_safety(self, metadata:dict) -> str:
         raise NotImplementedError
 
-    def get_md5(metadata:dict) -> str:
+    def get_md5(self, metadata:dict) -> str:
         raise NotImplementedError
 
-    def get_post_url(metadata:dict) -> str:
+    def get_post_url(self, metadata:dict) -> str:
         raise NotImplementedError
 
-    def get_pools(metadata:dict) -> list[resources.InternalPool]:
+    def get_pools(self, metadata:dict) -> list[resources.InternalPool]:
         raise NotImplementedError
 
 class ValidationPlugin(_base.PluginBase):

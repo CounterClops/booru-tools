@@ -22,6 +22,7 @@ class SharedAttributes:
     POST_CATEGORY_MAP = {
         "0": constants.Category.GENERAL,
         "1": constants.Category.ARTIST,
+        "2": constants.Category.CONTRIBUTOR,
         "3": constants.Category.COPYRIGHT,
         "4": constants.Category.CHARACTER,
         "5": constants.Category.SPECIES,
@@ -54,7 +55,7 @@ class E621Meta(SharedAttributes, _plugin_template.MetadataPlugin):
         return sources
 
     def get_description(self, metadata:dict) -> str:
-        description = metadata.get("description", "")
+        description:str = metadata.get("description", "")
         return description
 
     def get_tags(self, metadata: dict) -> list[resources.InternalTag]:
@@ -95,7 +96,7 @@ class E621Meta(SharedAttributes, _plugin_template.MetadataPlugin):
 
     def get_safety(self, metadata:dict) -> str:
         rating:str = metadata["rating"]
-        safety:str = self.POST_SAFETY_MAPPING.get(rating, "sketchy")
+        safety:str = self.POST_SAFETY_MAPPING.get(rating, constants.Safety._DEFAULT)
         return safety
 
     def get_md5(self, metadata: dict) -> str:

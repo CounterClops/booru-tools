@@ -46,6 +46,9 @@ class Metadata:
     def get(self, key:Any, default:Any=None):
         return self.data.get(key, default)
     
+    def items(self, *args, **kwargs):
+        return self.data.items(*args, **kwargs)
+    
     @classmethod
     def from_dict(cls, data: dict) -> "Metadata":
         return cls(data=data)
@@ -70,7 +73,7 @@ class InternalResource:
         filtered_data = {key: value for key, value in data.items() if key in valid_keys}
         return filtered_data
 
-    def update_attributes(self, update_object:"InternalResource") -> None:
+    def update_attributes(self, update_object:"InternalResource", allow_blank_values:bool=False) -> None:
         """Updates the object with the provided objects attributes, ignores default values and base fields
 
         Args:
@@ -87,12 +90,42 @@ class InternalResource:
             if field.name in ["plugins", "metadata", "_extra"]:
                 continue
 
+            if not allow_blank_values:
+                if not new_value:
+                    continue
+
             setattr(self, field.name, new_value)
     
-    def create_merged_copy(self, update_object:"InternalResource") -> "InternalResource":
+    def create_merged_copy(self, update_object:"InternalResource", allow_blank_values:bool=False) -> "InternalResource":
         self_copy = deepcopy(self)
-        self_copy.update_attributes(update_object=update_object)
+        self_copy.update_attributes(update_object=update_object, allow_blank_values=allow_blank_values)
         return self_copy
+    
+    def diff(self, resource:"InternalResource", fields_to_ignore:list=[]) -> dict:
+        diff = {}
+        ignored_fields = self._default_diff_ignored_fields + fields_to_ignore
+        for field in fields(self):
+            if field.name in ignored_fields:
+                continue
+            self_value = getattr(self, field.name)
+            other_value = getattr(resource, field.name)
+            if self_value != other_value:
+                if isinstance(self_value, list):
+                    dif_value = [item for item in self_value if item not in other_value]
+                    if not dif_value:
+                        continue
+                elif isinstance(self_value, dict):
+                    dif_value = {key: value for key, value in self_value.items() if value != other_value.get(key)}
+                    if not dif_value:
+                        continue
+                else:
+                    dif_value = self_value
+                diff[field.name] = dif_value
+        return diff
+    
+    @property
+    def _default_diff_ignored_fields(self):
+        return ["plugins", "metadata", "_extra"]
 
 @dataclass(kw_only=True)
 class InternalTag(InternalResource):
@@ -177,28 +210,10 @@ class InternalPost(InternalResource):
         if not sources:
             self.sources = []
         self.sources = sources
-
-    def diff(self, post:"InternalPost", fields_to_ignore:list=[]) -> dict:
-        diff = {}
-        ignored_fields = ["plugins", "metadata", "_extra", "relations"] + fields_to_ignore
-        for field in fields(self):
-            if field.name in ignored_fields:
-                continue
-            self_value = getattr(self, field.name)
-            other_value = getattr(post, field.name)
-            if self_value != other_value:
-                if isinstance(self_value, list):
-                    dif_value = [item for item in self_value if item not in other_value]
-                    if not dif_value:
-                        continue
-                elif isinstance(self_value, dict):
-                    dif_value = {key: value for key, value in self_value.items() if value != other_value.get(key)}
-                    if not dif_value:
-                        continue
-                else:
-                    dif_value = self_value
-                diff[field.name] = dif_value
-        return diff
+    
+    @property
+    def _default_diff_ignored_fields(self):
+        return ["plugins", "metadata", "_extra", "relations"]
 
     @property
     def sources(self) -> list:

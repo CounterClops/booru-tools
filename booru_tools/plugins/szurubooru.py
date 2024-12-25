@@ -399,8 +399,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         return None
     
     async def find_similar_posts(self, post:resources.InternalPost) -> list[resources.InternalPost]:
-        content_token = await self._upload_temporary_file(file=post.local_file)
-        post._extra[self._NAME]["content_token"] = content_token
+        content_token = await self._retrieve_content_token(post=post)
         image_search = await self._reverse_image_search(content_token=content_token)
 
         if image_search.exact_post:
@@ -465,6 +464,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             return destination_tag.to_resource()
 
         merged_names = list(set(tag.names + destination_tag.names))
+        logger.info(f"Updating tag '{tag_name}' with names=({tag.names}), category=({tag.category})")
         new_tag = await self._update_tag(
             version_id=destination_tag.version,
             names=merged_names,
@@ -475,8 +475,13 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
     async def push_post(self, post:resources.InternalPost, force_update:bool=False) -> resources.InternalPost:
         if post.local_file:
-            if not post._extra.get(self._NAME, {}).get("content_token"):
-                logger.debug("Content token found, doing reverse image search")
+            try:
+                content_token = await self._retrieve_content_token(post=post)
+            except errors.MissingFile:
+                content_token = None
+
+            if content_token:
+                logger.debug(f"Content token found '{content_token}', doing reverse image search")
                 similar_posts = await self.find_similar_posts(post=post)
             else:
                 logger.debug("Blanking similar posts as there is no content_token")
@@ -484,8 +489,12 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
             if not similar_posts:
                 logger.debug("No similar posts found, creating new post")
-                new_post = await self._create_post(post=post)
-                return new_post.to_resource()
+                try:
+                    new_post = await self._create_post(post=post)
+                    return new_post.to_resource()
+                except aiohttp.ClientResponseError as e:
+                    logger.error(f"Error on post creation with '{e}' when creating post with resource {post}")
+                    return None
 
             min_distance = similar_posts[0]._extra[self._NAME].get("distance", "??")
             max_distance = similar_posts[-1]._extra[self._NAME].get("distance", "??")
@@ -513,13 +522,17 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             "post_url",
             "description",
         ]
-        changes = post.diff(post=exact_post, fields_to_ignore=ignored_fields)
+        changes = post.diff(resource=exact_post, fields_to_ignore=ignored_fields)
         if changes:
             logger.debug(f"Changes found in post: {changes}")
-            new_post = await self._update_post(
-                original_post=exact_post,
-                new_post=post
-            )
+            try:
+                new_post = await self._update_post(
+                    original_post=exact_post,
+                    new_post=post
+                )
+            except aiohttp.ClientResponseError as error:
+                logger.error(f"Failed to update post with {error}")
+                return None
             return new_post.to_resource()
         return exact_post
 
@@ -553,6 +566,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 params=params
             ) as response:
             response_json = await response.json()
+            response.raise_for_status()
 
         post_search:PagedSearch[Post] = PagedSearch.from_dict(data=response_json, resource_type=Post)
 
@@ -572,6 +586,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 params=params
             ) as response:
             response_json = await response.json()
+            response.raise_for_status()
 
         tag_search:PagedSearch[Tag] = PagedSearch.from_dict(data=response_json, resource_type=Tag)
 
@@ -605,6 +620,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 headers=self.headers,
             ) as response:
             response_json = await response.json()
+            response.raise_for_status()
 
         if response_json:
             tag = Tag.from_dict(response_json)
@@ -626,6 +642,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 json=data
             ) as response:
             response_json = await response.json()
+            response.raise_for_status()
         
         tag = Tag.from_dict(response_json)
 
@@ -646,6 +663,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 json=data
             ) as response:
             response_json = await response.json()
+            response.raise_for_status()
 
         tag = Tag.from_dict(response_json)
 
@@ -658,7 +676,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             "tags": post.str_tags,
             "safety": post.safety,
             "source": "\n".join(post.sources),
-            "contentToken": post._extra[self._NAME]["content_token"]
+            "contentToken": await self._retrieve_content_token(post=post)
         }
 
         async with self.session.post(
@@ -667,6 +685,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 json=data
             ) as response:
             response_json = await response.json()
+            response.raise_for_status()
 
         post = Post.from_dict(response_json)
 
@@ -682,9 +701,11 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             "source": "\n".join(new_post.sources)
         }
 
-        content_token = new_post._extra[self._NAME].get("content_token")
-        if content_token:
+        try:
+            content_token = await self._retrieve_content_token(post=new_post)
             data["contentToken"] = content_token
+        except errors.MissingFile:
+            pass            
 
         async with self.session.put(
                 url=url,
@@ -692,10 +713,23 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 json=data
             ) as response:
             response_json = await response.json()
+            response.raise_for_status()
 
         post = Post.from_dict(response_json)
 
         return post
+    
+    async def _retrieve_content_token(self, post:resources.InternalPost) -> str:
+        content_token = post._extra[self._NAME].get("content_token")
+        if content_token:
+            return content_token
+        
+        if post.local_file:
+            content_token = await self._upload_temporary_file(file=post.local_file)
+            post._extra[self._NAME]["content_token"] = content_token
+            return content_token
+        
+        raise errors.MissingFile
 
     async def _upload_temporary_file(self, file:Path) -> str:
         """Upload the provided file to the Szurubooru temporary upload endpoint
@@ -718,6 +752,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                     data=form
                 ) as response:
                 response_json = await response.json()
+                response.raise_for_status()
 
         token:str = response_json["token"]
         
@@ -738,6 +773,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 json=data
             ) as response:
             response_json = await response.json()
+            response.raise_for_status()
 
         image_search:ImageSearch[Post] = ImageSearch.from_dict(data=response_json)
 
