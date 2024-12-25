@@ -4,7 +4,7 @@ from pathlib import Path
 import asyncio
 
 from booru_tools import core
-from booru_tools.shared import resources
+from booru_tools.shared import resources, constants
 from booru_tools.plugins import _plugin_template
 from booru_tools.tools.gallery_dl import GalleryDl
 
@@ -14,7 +14,20 @@ class ImportPostsCommand():
         self.blank_download_page_count = 0
         self.all_tags:list[resources.InternalTag] = []
     
-    async def post_init(self, destination:str, url:list[str]=[], import_site:str="", urls_file:Path=None, cookies:Path=None, blacklisted_tags:str="", required_tags:str="", allowed_blank_pages:int=1, match_source:bool=True, plugin_override:str="", download_page_size:int=100):
+    async def post_init(self, 
+                destination:str, 
+                url:list[str]=[], 
+                import_site:str="", 
+                urls_file:Path=None, 
+                cookies:Path=None, 
+                blacklisted_tags:str="", 
+                required_tags:str="", 
+                allowed_blank_pages:int=1, 
+                match_source:bool=True, 
+                plugin_override:str="", 
+                download_page_size:int=100,
+                allowed_safety:str=""
+            ):
         booru_config = {
             "destination": destination
         }
@@ -48,10 +61,16 @@ class ImportPostsCommand():
             url_base = url_base.rstrip("/")
             self.booru_tools.destination_plugin.URL_BASE = url_base
 
-        self.blacklisted_tags = [tag for tag in blacklisted_tags.split(",") if tag != ""]
-        self.required_tags = [tag for tag in required_tags.split(",") if tag != ""]
+        self.blacklisted_tags = self.booru_tools.split_tag_list(blacklisted_tags)
+        self.required_tags = self.booru_tools.split_tag_list(required_tags)
         self.allowed_blank_pages = allowed_blank_pages
         self.download_page_size = download_page_size
+
+        self.allowed_safety = []
+        for safety in allowed_safety.split(","):
+            standard_safety = constants.Safety.get_matching_safety(safety=safety, return_default=False)
+            if standard_safety:
+                self.allowed_safety.append(standard_safety)
 
     async def run(self, *args, **kwargs):
         await self.post_init(*args, **kwargs)
@@ -88,6 +107,19 @@ class ImportPostsCommand():
             if self._check_download_limit_reached():
                 break
     
+    def check_post_allowed(self, post:resources.InternalPost):
+        if post.contains_any_tags(tags=self.blacklisted_tags):
+            logger.debug(f"Post '{post.id}' contains blacklisted tags from {self.blacklisted_tags}")
+            return False
+        if not post.contains_all_tags(tags=self.required_tags):
+            logger.debug(f"Post '{post.id}' does not contain all required tags from {self.required_tags}")
+            return False
+        if self.allowed_safety and (post.safety not in self.allowed_safety):
+            logger.debug(f"Post '{post.id}' is not in the allowed safety selection from {self.allowed_safety}")
+            return False
+        logger.debug(f"Post '{post.id}' passed all checks")
+        return True
+
     async def _ingest_folder(self, folder:Path) -> list[resources.InternalPost]:
         metadata_list = self.booru_tools.import_metadata_files(download_directory=folder)
         logger.debug(f"Reviewing the metadata of {len(metadata_list)} files")
@@ -98,11 +130,8 @@ class ImportPostsCommand():
         for metadata in metadata_list:
             post:resources.InternalPost = self.booru_tools.create_post_from_metadata(metadata=metadata, download_link="")
             
-            if post.contains_any_tags(tags=self.blacklisted_tags):
-                logger.info(f"Skipping '{post.id}' as it contains blacklisted tags from {self.blacklisted_tags}")
-                continue
-            if not post.contains_all_tags(tags=self.required_tags):
-                logger.info(f"Skipping '{post.id}' as it does not contain all required tags from {self.required_tags}")
+            if not self.check_post_allowed(post=post):
+                logger.info(f"Skipping '{post.id}' as it is not allowed with current config")
                 continue
 
             all_posts.append(post)
@@ -157,12 +186,13 @@ class ImportPostsCommand():
 @click.option('--urls-file', multiple=True, type=Path, help='A file containing URLs to import')
 @click.option('--destination', default="szurubooru", help='Where to send the new posts to')
 @click.option('--cookies', type=Path, help='The cookies to use for this download')
-@click.option('--blacklisted-tags', type=str, default="", help="A comma seperated list of tags to blacklist")
-@click.option('--required-tags', type=str, default="", help="A comma seperated list of tags to require on all posts")
+@click.option('--blacklisted-tags', type=str, default="", help="A comma seperated list of tags to blacklist, you can specify an AND condition with |")
+@click.option('--required-tags', type=str, default="", help="A comma seperated list of tags to require on all posts, you can specify an AND condition with |")
 @click.option('--match-source/--ignore-source', default=True, help="Whether post source should be used when importing")
 @click.option('--allowed-blank-pages', type=int, default=1, help="Number of pages to download post pages before stopping")
 @click.option('--plugin-override', type=str, help="Provide plugin override values")
 @click.option('--download-page-size', type=int, default=100, help="The number of posts to download per page")
+@click.option('--allowed-safety', type=str, default="", help=f"The comma seperated list of allowed safety ratings from [{constants.Safety.SAFE},{constants.Safety.SKETCHY},{constants.Safety.UNSAFE}]")
 # Need to add something to require specific ratings as these aren't generally
 def cli(*args, **kwargs):
     command = ImportPostsCommand()

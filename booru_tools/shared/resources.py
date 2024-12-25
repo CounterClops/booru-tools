@@ -245,6 +245,8 @@ class InternalPost(InternalResource):
                 if tag in post_tags:
                     logger.debug(f"Post '{self.id}' contains tags from {tags}")
                     return True
+            if isinstance(tag, list):
+                return self.contains_all_tags(tags=tag)
             elif isinstance(tag, InternalTag):
                 tag_strings = set(tag.all_tag_strings())
                 if post_tags.intersection(tag_strings):
@@ -254,17 +256,21 @@ class InternalPost(InternalResource):
     
     def contains_all_tags(self, tags:list[str|InternalTag]) -> bool:
         post_tags = set(self.str_tags)
-        required_tags = set()
+        all_tags = set()
         for tag in tags:
             if isinstance(tag, InternalTag):
                 tag_strings = set(tag.all_tag_strings())
-                required_tags.update(tag_strings)
+                all_tags.update(tag_strings)
             else:
-                required_tags.add(tag)
+                all_tags.add(tag)
         
-        contains_all_tags =  all(required_tag in post_tags for required_tag in required_tags)
-        if contains_all_tags:
-            logger.debug(f"Post '{self.id}' contains all required tags from {tags}")
+        contains_all_single_tags =  all(required_tag in post_tags for required_tag in all_tags if isinstance(required_tag, str))
+        if contains_all_single_tags:
+            and_tags = [and_tag for and_tag in all_tags if isinstance(and_tag, list)]
+            if and_tags:
+                if not self.contains_all_tags(tags=and_tags):
+                    return False
+            logger.debug(f"Post '{self.id}' contains all tags from {tags}")
             return True
         return False
     

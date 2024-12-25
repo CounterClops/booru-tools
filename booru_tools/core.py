@@ -204,3 +204,19 @@ class BooruTools:
             logger.debug(f"Found '{media_file}' media file")
             return media_file
         return None
+
+    @staticmethod
+    def split_tag_list(tag_string:str):
+        and_seperator = "|"
+        or_seperator = ","
+
+        tags = []
+        comma_split_tags = [tag for tag in tag_string.split(or_seperator) if tag != ""]
+        for tag in comma_split_tags:
+            if and_seperator in tag:
+                and_tags = tag.split(and_seperator)
+                tags.append(and_tags)
+            else:
+                tags.append(tag)
+
+        return tags
