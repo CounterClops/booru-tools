@@ -9,3 +9,6 @@ class NoPluginFound(Exception):
 
 class PostExists(Exception):
     pass
+
+class MissingFile(Exception):
+    pass

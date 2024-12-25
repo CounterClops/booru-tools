@@ -80,13 +80,12 @@ class ImportPostsCommand():
         
         for download_folder in metadata_downloader:
             posts = await self._ingest_folder(folder=download_folder)
-            post_count = len(posts)
             try:
                 await self.booru_tools.update_posts(posts=posts)
             except TypeError as e:
                 logger.warning(f"Error updating posts due to {e}")
             self.booru_tools.delete_directory(directory=download_folder)
-            if self._check_download_limit_reached(post_count=post_count):
+            if self._check_download_limit_reached():
                 break
     
     async def _ingest_folder(self, folder:Path) -> list[resources.InternalPost]:
@@ -144,16 +143,10 @@ class ImportPostsCommand():
         
         return downloaded_posts
     
-    def _check_download_limit_reached(self, post_count:int=0) -> bool:
-        if post_count:
-            less_posts_than_max = post_count < self.download_page_size
-            if less_posts_than_max:
-                logger.info(f"Downloaded {post_count} posts, less than the maximum number of posts ({self.download_page_size}), stopping")
-                return True
-        
+    def _check_download_limit_reached(self) -> bool:      
         page_count_past_limit = self.blank_download_page_count >= self.allowed_blank_pages
-        download_page_limit_disable = self.blank_download_page_count == 0
-        if page_count_past_limit and not download_page_limit_disable:
+        download_page_limit_enabled = self.allowed_blank_pages != 0
+        if page_count_past_limit and download_page_limit_enabled:
             logger.info(f"Reached the maximum number of blank pages ({self.allowed_blank_pages}), stopping")
             return True
         return False
@@ -170,7 +163,7 @@ class ImportPostsCommand():
 @click.option('--allowed-blank-pages', type=int, default=1, help="Number of pages to download post pages before stopping")
 @click.option('--plugin-override', type=str, help="Provide plugin override values")
 @click.option('--download-page-size', type=int, default=100, help="The number of posts to download per page")
-# Need to add something to require specific ratings as these aren't generally tags
+# Need to add something to require specific ratings as these aren't generally
 def cli(*args, **kwargs):
     command = ImportPostsCommand()
     asyncio.run(command.run(*args, **kwargs))

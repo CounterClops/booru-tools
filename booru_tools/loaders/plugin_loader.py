@@ -143,15 +143,20 @@ class PluginLoader:
     def load_matching_plugin(self, name:str="", domain:str="", category:str="") -> _base.PluginBase:
         logger.debug(f"Starting search for {self.plugin_class.__class__.__name__} plugin with domain={domain}, category={category}")
 
-        plugin:InternalPlugin = self.find_plugin(
-            domain=domain,
-            category=category,
-            name=name
-        )
+        try:
+            plugin:InternalPlugin = self.find_plugin(
+                domain=domain,
+                category=category,
+                name=name
+            )
+        except errors.NoPluginFound as e:
+            logger.debug("Couldn't find a matching plugin with ({e})")
+            return None
 
-        loaded_plugin = self.initialise_plugin(plugin=plugin)        
-
-        return loaded_plugin
+        if plugin:
+            loaded_plugin = self.initialise_plugin(plugin=plugin)
+            return loaded_plugin
+        return None
 
     @functools.cache
     def load_all_plugins(self) -> list[_base.PluginBase]:

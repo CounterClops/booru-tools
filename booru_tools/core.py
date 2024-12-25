@@ -7,7 +7,6 @@ import shutil
 
 import asyncio
 import aiohttp
-import aiofiles
 import signal
 
 from booru_tools.loaders import plugin_loader
