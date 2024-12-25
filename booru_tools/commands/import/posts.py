@@ -37,10 +37,10 @@ class ImportPostsCommand():
         )
 
         if plugin_override:
-            override_pairs = plugin_override.split(",")
-            for pair in override_pairs:
-                key, value = pair.split("=")
-                setattr(self.booru_tools.destination_plugin, key, value)
+            self.booru_tools.override_plugin_config(
+                plugin=self.booru_tools.destination_plugin,
+                plugin_override=plugin_override
+            )
         
         self.urls = url
         if import_site:

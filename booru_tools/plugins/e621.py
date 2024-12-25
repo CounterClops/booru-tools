@@ -279,7 +279,7 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
         return posts
     
     async def _download_latest_db_export(self, filename_string:str) -> Path|None:
-        db_export_links = self._get_db_export_links()
+        db_export_links = await self._get_db_export_links()
         db_export_links.sort(key=lambda link: link.split("/")[-1], reverse=True)
         
         for link in db_export_links:
@@ -287,11 +287,14 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
             if filename_string not in filename:
                 continue
 
-            response = requests.get(link)
-            local_file = self.create_tmp_directory() / filename
-
-            with open(local_file, "wb") as file:
-                file.write(response.content)
+            async with self.session.get(
+                url=link
+                ) as response:
+                local_file = self.create_tmp_directory() / filename
+                
+                content = await response.content
+                with open(local_file, "wb") as file:
+                    file.write(await content)
 
             logger.debug(f"Downloaded db export '{filename}'")
 
@@ -299,12 +302,15 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
         return None
 
     @functools.cache # Need to look into using https://pypi.org/project/async-lru/ https://github.com/aio-libs/async-lru
-    def _get_db_export_links(self) -> list[str]:
+    async def _get_db_export_links(self) -> list[str]:
         url = "https://e621.net/db_export/"
         export_file_extension = ".csv.gz"
         
-        response = requests.get(url)
-        soup = BeautifulSoup(response.content, "html.parser")
+        async with self.session.get(
+            url=url
+            ) as response:
+            content = await response.content
+            soup = BeautifulSoup(content, "html.parser")
         
         links = soup.find_all("a", href=True)
         file_links = [url + link["href"] for link in links if link["href"].endswith(export_file_extension)]

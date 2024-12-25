@@ -216,11 +216,11 @@ class InternalPost(InternalResource):
         return ["plugins", "metadata", "_extra", "relations"]
 
     @property
-    def sources(self) -> list:
+    def sources(self) -> list[str]:
         return self._sources
 
     @sources.setter
-    def sources(self, value):
+    def sources(self, value) -> None:
         self._sources = UniqueList(set(value))
 
     def sources_of_type(self, desired_source_type:str) -> list[str]:

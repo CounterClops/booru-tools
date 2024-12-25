@@ -54,6 +54,8 @@ class BooruTools:
     def raise_graceful_exit(self, *args):
         try:
             loop = asyncio.get_event_loop()
+            for task in asyncio.all_tasks():
+                task.cancel()
             loop.stop()
         except RuntimeError:
             logger.debug("No async loop")
@@ -206,10 +208,7 @@ class BooruTools:
         return None
 
     @staticmethod
-    def split_tag_list(tag_string:str):
-        and_seperator = "|"
-        or_seperator = ","
-
+    def split_tag_list(tag_string:str, and_seperator:str="|", or_seperator:str=","):
         tags = []
         comma_split_tags = [tag for tag in tag_string.split(or_seperator) if tag != ""]
         for tag in comma_split_tags:
@@ -218,5 +217,10 @@ class BooruTools:
                 tags.append(and_tags)
             else:
                 tags.append(tag)
-
         return tags
+    
+    def override_plugin_config(self, plugin:object, plugin_override:str=""):
+        override_pairs = plugin_override.split(",")
+        for pair in override_pairs:
+            key, value = pair.split("=")
+            setattr(plugin, key, value)
