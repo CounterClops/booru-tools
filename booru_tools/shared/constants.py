@@ -1,6 +1,7 @@
 class Category:
     GENERAL = "General"
     ARTIST = "Artist"
+    CONTRIBUTOR = "Contributor"
     COPYRIGHT = "Copyright"
     CHARACTER = "Character"
     SPECIES = "Species"
