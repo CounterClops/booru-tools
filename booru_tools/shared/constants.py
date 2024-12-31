@@ -24,7 +24,7 @@ class Safety:
             if safety.lower() == value.lower():
                 return value
         if return_default:
-            return self._DEFAULT
+            return cls._DEFAULT
         return None
 
 class SourceTypes:

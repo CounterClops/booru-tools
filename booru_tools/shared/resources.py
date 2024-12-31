@@ -73,7 +73,7 @@ class InternalResource:
         filtered_data = {key: value for key, value in data.items() if key in valid_keys}
         return filtered_data
 
-    def update_attributes(self, update_object:"InternalResource", allow_blank_values:bool=False) -> None:
+    def update_attributes(self, update_object:"InternalResource", allow_blank_values:bool=False, merge_where_possible:bool=False) -> None:
         """Updates the object with the provided objects attributes, ignores default values and base fields
 
         Args:
@@ -93,12 +93,26 @@ class InternalResource:
             if not allow_blank_values:
                 if not new_value:
                     continue
+            
+            if merge_where_possible:
+                old_value = getattr(self, field.name)
+                if isinstance(old_value, list):
+                    for value in new_value:
+                        if value in old_value:
+                            continue
+                        old_value.append(value)
+                if isinstance(old_value, dict):
+                    old_value.update(new_value)
 
             setattr(self, field.name, new_value)
     
-    def create_merged_copy(self, update_object:"InternalResource", allow_blank_values:bool=False) -> "InternalResource":
+    def create_merged_copy(self, update_object:"InternalResource", allow_blank_values:bool=False, merge_where_possible:bool=True) -> "InternalResource":
         self_copy = deepcopy(self)
-        self_copy.update_attributes(update_object=update_object, allow_blank_values=allow_blank_values)
+        self_copy.update_attributes(
+            update_object=update_object,
+            allow_blank_values=allow_blank_values,
+            merge_where_possible=merge_where_possible
+        )
         return self_copy
     
     def diff(self, resource:"InternalResource", fields_to_ignore:list=[]) -> dict:
@@ -125,12 +139,12 @@ class InternalResource:
     
     @property
     def _default_diff_ignored_fields(self):
-        return ["plugins", "metadata", "_extra"]
+        return ["plugins", "metadata", "_extra", "origin"]
 
 @dataclass(kw_only=True)
 class InternalTag(InternalResource):
     names: list[str] # The list of names for this tag
-    category: Optional[str] = "" # The tag category string
+    category: Optional[str] = constants.Category._DEFAULT # The tag category string
     implications: Optional[list["InternalTag"]] = field(default_factory=list) # A list of all tags this specific tag implies.
 
     def __eq__(self, other):

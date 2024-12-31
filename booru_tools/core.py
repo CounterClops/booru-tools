@@ -4,6 +4,7 @@ from loguru import logger
 from collections import defaultdict
 import json
 import shutil
+import time
 
 import asyncio
 import aiohttp
@@ -111,8 +112,12 @@ class BooruTools:
             logger.debug(f"Updating tag '{tag}' to category '{tag.category}'")
             try:
                 await self.destination_plugin.push_tag(tag=tag)
-            except Exception as e:
+            except KeyError as e:
                 logger.warning(f"Error updating the tag '{tag}' due to {e}")
+                exit()
+            except errors.InternalServerError as error:
+                logger.critical(f"Unable to update tag {tag} due to {error}")
+                continue
 
     def create_post_from_metadata(self, metadata:resources.Metadata, download_link:str) -> resources.InternalPost:
         try:

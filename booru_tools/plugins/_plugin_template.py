@@ -92,6 +92,7 @@ class ApiPlugin(_base.PluginBase):
         current_time = datetime.now()
         timestamp = str(current_time.timestamp())
         download_directory = self.tmp_path / timestamp
+        download_directory.mkdir(parents=True, exist_ok=True)
         return download_directory
     
     async def find_exact_post(self, post:resources.InternalPost) -> resources.InternalPost | None:
@@ -106,7 +107,7 @@ class ApiPlugin(_base.PluginBase):
     async def find_exact_tag(self, tag:resources.InternalTag) -> resources.InternalTag | None:
         raise NotImplementedError
     
-    async def get_all_tags(self) -> list[resources.InternalTag]:
+    async def get_all_tags(self, treat_aliases_as_implications:bool=True) -> list[resources.InternalTag]:
         raise NotImplementedError
     
     async def get_all_pools(self) -> list[resources.InternalPool]:
@@ -115,7 +116,7 @@ class ApiPlugin(_base.PluginBase):
     async def get_all_posts(self) -> list[resources.InternalPost]:
         raise NotImplementedError
 
-    async def push_tag(self, tag:resources.InternalTag) -> resources.InternalTag:
+    async def push_tag(self, tag:resources.InternalTag, replace_tags:bool=False, create_empty_tags:bool=True) -> resources.InternalTag:
         raise NotImplementedError
 
     async def push_post(self, post:resources.InternalPost) -> resources.InternalPost:
