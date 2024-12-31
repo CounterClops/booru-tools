@@ -1,14 +1,16 @@
-from booru_tools.plugins import _plugin_template
-from booru_tools.shared import errors, constants, resources
 from loguru import logger
 from datetime import datetime
 from pathlib import Path
-import functools
-import requests
 from bs4 import BeautifulSoup
+from async_lru import alru_cache
 import gzip, csv
 import aiohttp
 import re
+import functools
+import requests
+
+from booru_tools.plugins import _plugin_template
+from booru_tools.shared import errors, constants, resources
 
 class SharedAttributes:
     _DOMAINS = [
@@ -134,7 +136,7 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
             "Accept": "application/json",
             "User-Agent": "booru-tools/1.0"
         }
-        self.tag_post_count_threshold = 0
+        self.tag_post_count_threshold = 5
         self.tmp_path = Path("tmp")
 
     async def get_pool(self, id:int) -> resources.InternalPool:
@@ -161,7 +163,7 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
 
         return pool
 
-    async def get_all_tags(self) -> list[resources.InternalTag]:
+    async def get_all_tags(self, treat_aliases_as_implications:bool=False) -> list[resources.InternalTag]:
         tag_aliases_export_archive = await self._download_latest_db_export(filename_string="tag_aliases-")
         tag_implications_export_archive = await self._download_latest_db_export(filename_string="tag_implications-")
         tags_export_archive = await self._download_latest_db_export(filename_string="tags-")
@@ -169,28 +171,32 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
         tags:dict[str, resources.InternalTag] = {}
 
         with gzip.open(tags_export_archive, "rt") as tags_gz:
+            logger.info(f"Processing tags from {tags_export_archive}")
             tags_csv_reader = csv.DictReader(tags_gz)
 
             for tag in tags_csv_reader:
-                if tag.get("post_count", 0) <= self.tag_post_count_threshold:
-                    logger.debug(f"Skipping tag '{name}' as its under the post_count threshold of {self.tag_post_count_threshold}")
-                    continue
-
                 name = tag["name"]
                 category_id = tag["category"]
+                post_count = int(tag.get("post_count", 0))
 
-                if category_id == 6:
-                    logger.debug(f"Skipping tag '{name}' as its in the invalid category")
+                if post_count < self.tag_post_count_threshold:
+                    # logger.debug(f"Skipping tag '{name}' as its under the post_count threshold of {self.tag_post_count_threshold}")
                     continue
 
-                category = self.POST_CATEGORY_MAP.get(category_id, "")
+                category = self.POST_CATEGORY_MAP.get(category_id, constants.Category._DEFAULT)
 
+                if category == constants.Category.INVALID:
+                    # logger.debug(f"Skipping tag '{name}' as its in the {constants.Category.INVALID} category")
+                    continue
+                
                 tags[name] = resources.InternalTag(
                     names=[name],
                     category=category
                 )
+                # logger.debug(f"Added tag {name}")
 
         with gzip.open(tag_aliases_export_archive, "rt") as tag_aliases_gz:
+            logger.info(f"Processing tag aliases from {tags_export_archive}")
             tag_aliases_csv_reader = csv.DictReader(tag_aliases_gz)
 
             for tag_alias in tag_aliases_csv_reader:
@@ -198,12 +204,21 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
                     continue
                 name = tag_alias["consequent_name"]
                 alias = tag_alias["antecedent_name"]
-                try:
-                    tags[name].names.append(alias)
-                except KeyError:
-                    logger.debug(f"Skipping alias '{alias}' as the tag '{name}' didn't exist")
+                if treat_aliases_as_implications:
+                    tags = self._add_implication(
+                        tags=tags,
+                        name=name,
+                        implication=alias
+                    )
+                else:
+                    tags = self._add_alias(
+                        tags=tags,
+                        name=name,
+                        alias=alias
+                    )
             
         with gzip.open(tag_implications_export_archive, "rt") as tag_implications_gz:
+            logger.info(f"Processing tag implications from {tags_export_archive}")
             tag_implications_csv_reader = csv.DictReader(tag_implications_gz)
 
             for tag_implication in tag_implications_csv_reader:
@@ -211,10 +226,11 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
                     continue
                 name = tag_implication["antecedent_name"]
                 implication = tag_implication["consequent_name"]
-                try:
-                    tags[name].implications.append(tags[implication])
-                except KeyError:
-                    logger.debug(f"Skipping implication '{implication}' as the tag '{name}' or '{implication}' didn't exist")
+                tags = self._add_implication(
+                    tags=tags,
+                    name=name,
+                    implication=implication
+                )
             
         return tags.values()
     
@@ -290,32 +306,48 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
             async with self.session.get(
                 url=link
                 ) as response:
-                local_file = self.create_tmp_directory() / filename
-                
-                content = await response.content
-                with open(local_file, "wb") as file:
-                    file.write(await content)
+                content = await response.content.read()
+            
+            local_file = self.create_tmp_directory() / filename
+            with open(local_file, "wb") as file:
+                file.write(content)
 
             logger.debug(f"Downloaded db export '{filename}'")
 
             return local_file
         return None
 
-    @functools.cache # Need to look into using https://pypi.org/project/async-lru/ https://github.com/aio-libs/async-lru
+    @alru_cache(ttl=120)
     async def _get_db_export_links(self) -> list[str]:
-        url = "https://e621.net/db_export/"
+        url = f"{self.URL_BASE}/db_export/"
         export_file_extension = ".csv.gz"
         
         async with self.session.get(
             url=url
             ) as response:
-            content = await response.content
-            soup = BeautifulSoup(content, "html.parser")
-        
+            content = await response.content.read()
+
+        soup = BeautifulSoup(content, "html.parser")
         links = soup.find_all("a", href=True)
         file_links = [url + link["href"] for link in links if link["href"].endswith(export_file_extension)]
 
         return file_links
+
+    def _add_implication(self, tags:dict[str, resources.InternalTag], name:str, implication:str):
+        logger.debug(f"Adding implication '{implication}' to '{name}'")
+        try:
+            tags[name].implications.append(tags[implication])
+        except KeyError:
+            logger.debug(f"Skipping implication '{implication}' as the tag '{name}' or '{implication}' didn't exist")
+        return tags
+
+    def _add_alias(self, tags:dict[str, resources.InternalTag], name:str, alias:str):
+        logger.debug(f"Adding alias '{alias}' to '{name}'")
+        try:
+            tags[name].names.append(alias)
+        except KeyError:
+            logger.debug(f"Skipping alias '{alias}' as the tag '{name}' didn't exist")
+        return tags
 
 class E621Validator(SharedAttributes, _plugin_template.ValidationPlugin):
     POST_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z0-9.-]+\/posts\/.+)|(https:\/\/[a-zA-Z0-9.-]+\/data\/sample\/.+)")
