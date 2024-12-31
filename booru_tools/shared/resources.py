@@ -199,6 +199,7 @@ class InternalPost(InternalResource):
     id: int
     category: Optional[str] = ""
     description: Optional[str] = ""
+    score: int = 0
     tags: Optional[list[InternalTag]] = field(default_factory=list)
     sources: InitVar[list[str]] = field(default_factory=UniqueList)
     created_at: Optional[datetime] = None
@@ -227,7 +228,7 @@ class InternalPost(InternalResource):
     
     @property
     def _default_diff_ignored_fields(self):
-        return ["plugins", "metadata", "_extra", "relations"]
+        return ["plugins", "metadata", "_extra", "relations", "score"]
 
     @property
     def sources(self) -> list[str]:
