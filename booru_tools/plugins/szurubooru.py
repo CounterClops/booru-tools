@@ -1,15 +1,249 @@
 from dataclasses import dataclass, field, fields
-from typing import Optional, Literal, Type, Generic, TypeVar
+from typing import Optional, Literal, Type, Generic, TypeVar, ParamSpec, Callable, Awaitable, Any
 from pathlib import Path
 from datetime import datetime
 from loguru import logger
+from async_lru import alru_cache
 import urllib.parse
-import requests
 import asyncio
 import aiohttp
+import json
+import functools
 
 from booru_tools.plugins import _plugin_template
 from booru_tools.shared import resources, errors, constants
+
+class SzurubooruError(Exception):
+    pass
+
+class MissingRequiredFileError(SzurubooruError):
+    pass
+
+class MissingRequiredParameterError(SzurubooruError):
+    pass
+
+class InvalidParameterError(SzurubooruError):
+    pass
+
+class IntegrityError(SzurubooruError):
+    def __init__(self, message:str="Retry later", delay_time:int=30, retry_limit:int=6):
+        self.message = message
+        self.delay_time = delay_time
+        self.retry_limit = retry_limit
+        super().__init__(self.message)
+
+class SearchError(SzurubooruError):
+    pass
+
+class AuthError(SzurubooruError):
+    pass
+
+class PostNotFoundError(SzurubooruError):
+    pass
+
+class PostAlreadyFeaturedError(SzurubooruError):
+    pass
+
+class PostAlreadyUploadedError(SzurubooruError):
+    pass
+
+class InvalidPostIdError(SzurubooruError):
+    pass
+
+class InvalidPostSafetyError(SzurubooruError):
+    pass
+
+class InvalidPostSourceError(SzurubooruError):
+    pass
+
+class InvalidPostContentError(SzurubooruError):
+    pass
+
+class InvalidPostRelationError(SzurubooruError):
+    pass
+
+class InvalidPostNoteError(SzurubooruError):
+    pass
+
+class InvalidPostFlagError(SzurubooruError):
+    pass
+
+class InvalidFavoriteTargetError(SzurubooruError):
+    pass
+
+class InvalidCommentIdError(SzurubooruError):
+    pass
+
+class CommentNotFoundError(SzurubooruError):
+    pass
+
+class EmptyCommentTextError(SzurubooruError):
+    pass
+
+class InvalidScoreTargetError(SzurubooruError):
+    pass
+
+class InvalidScoreValueError(SzurubooruError):
+    pass
+
+class TagCategoryNotFoundError(SzurubooruError):
+    pass
+
+class TagCategoryAlreadyExistsError(SzurubooruError):
+    pass
+
+class TagCategoryIsInUseError(SzurubooruError):
+    pass
+
+class InvalidTagCategoryNameError(SzurubooruError):
+    pass
+
+class InvalidTagCategoryColorError(SzurubooruError):
+    pass
+
+class TagNotFoundError(SzurubooruError):
+    pass
+
+class TagAlreadyExistsError(SzurubooruError):
+    pass
+
+class TagIsInUseError(SzurubooruError):
+    pass
+
+class InvalidTagNameError(SzurubooruError):
+    pass
+
+class InvalidTagRelationError(SzurubooruError):
+    pass
+
+class InvalidTagCategoryError(SzurubooruError):
+    pass
+
+class InvalidTagDescriptionError(SzurubooruError):
+    pass
+
+class UserNotFoundError(SzurubooruError):
+    pass
+
+class UserAlreadyExistsError(SzurubooruError):
+    pass
+
+class InvalidUserNameError(SzurubooruError):
+    pass
+
+class InvalidEmailError(SzurubooruError):
+    pass
+
+class InvalidPasswordError(SzurubooruError):
+    pass
+
+class InvalidRankError(SzurubooruError):
+    pass
+
+class InvalidAvatarError(SzurubooruError):
+    pass
+
+class ProcessingError(SzurubooruError):
+    pass
+
+class ValidationError(SzurubooruError):
+    pass
+
+ERROR_MAP = {
+    "MissingRequiredFileError": MissingRequiredFileError,
+    "MissingRequiredParameterError": MissingRequiredParameterError,
+    "InvalidParameterError": InvalidParameterError,
+    "IntegrityError": IntegrityError,
+    "SearchError": SearchError,
+    "AuthError": AuthError,
+    "PostNotFoundError": PostNotFoundError,
+    "PostAlreadyFeaturedError": PostAlreadyFeaturedError,
+    "PostAlreadyUploadedError": PostAlreadyUploadedError,
+    "InvalidPostIdError": InvalidPostIdError,
+    "InvalidPostSafetyError": InvalidPostSafetyError,
+    "InvalidPostSourceError": InvalidPostSourceError,
+    "InvalidPostContentError": InvalidPostContentError,
+    "InvalidPostRelationError": InvalidPostRelationError,
+    "InvalidPostNoteError": InvalidPostNoteError,
+    "InvalidPostFlagError": InvalidPostFlagError,
+    "InvalidFavoriteTargetError": InvalidFavoriteTargetError,
+    "InvalidCommentIdError": InvalidCommentIdError,
+    "CommentNotFoundError": CommentNotFoundError,
+    "EmptyCommentTextError": EmptyCommentTextError,
+    "InvalidScoreTargetError": InvalidScoreTargetError,
+    "InvalidScoreValueError": InvalidScoreValueError,
+    "TagCategoryNotFoundError": TagCategoryNotFoundError,
+    "TagCategoryAlreadyExistsError": TagCategoryAlreadyExistsError,
+    "TagCategoryIsInUseError": TagCategoryIsInUseError,
+    "InvalidTagCategoryNameError": InvalidTagCategoryNameError,
+    "InvalidTagCategoryColorError": InvalidTagCategoryColorError,
+    "TagNotFoundError": TagNotFoundError,
+    "TagAlreadyExistsError": TagAlreadyExistsError,
+    "TagIsInUseError": TagIsInUseError,
+    "InvalidTagNameError": InvalidTagNameError,
+    "InvalidTagRelationError": InvalidTagRelationError,
+    "InvalidTagCategoryError": InvalidTagCategoryError,
+    "InvalidTagDescriptionError": InvalidTagDescriptionError,
+    "UserNotFoundError": UserNotFoundError,
+    "UserAlreadyExistsError": UserAlreadyExistsError,
+    "InvalidUserNameError": InvalidUserNameError,
+    "InvalidEmailError": InvalidEmailError,
+    "InvalidPasswordError": InvalidPasswordError,
+    "InvalidRankError": InvalidRankError,
+    "InvalidAvatarError": InvalidAvatarError,
+    "ProcessingError": ProcessingError,
+    "ValidationError": ValidationError
+}
+
+HTTP_CODE_MAP = {
+    500: errors.InternalServerError
+}
+
+P = ParamSpec("P")
+R = TypeVar('R') # , bound=Awaitable[Any]
+
+def SzurubooruErrorHandler(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+    @functools.wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> R:
+        try:
+            return await func(*args, **kwargs)
+        except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as error:
+            try:
+                error_json:dict = json.loads(error.message)
+                szurubooru_error_name = error_json.get("name")
+                szurubooru_error_description = error_json.get("description")
+                szurubooru_error_class = ERROR_MAP[szurubooru_error_name]
+                message = f"HTTP Error {error.status}: '{szurubooru_error_name}' {szurubooru_error_description}"
+                raise szurubooru_error_class(message)
+            except json.decoder.JSONDecodeError:
+                szurubooru_error_class = HTTP_CODE_MAP.get(error.status, None)
+                if szurubooru_error_class:
+                    raise szurubooru_error_class(f"Failed to decode error message. Full response text is '{error.message}'")
+                logger.critical(f"Failed to decode error message. Full response text is '{error.message}'")
+                raise error
+            except KeyError:
+                raise error
+    return wrapper
+
+def RetryOnWaitException(func: Callable[P, R]) -> Callable[P, R]:
+    @functools.wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> R:
+        try:
+            return await func(*args, **kwargs)
+        except IntegrityError as e:
+            logger.debug(f"{e}")
+            wait_time = e.delay_time
+            attempt_count = 1
+            attempt_limit = e.retry_limit
+            while attempt_count < attempt_limit:
+                try:
+                    logger.debug(f"Retrying in {wait_time}s")
+                    await asyncio.sleep(wait_time)
+                    return await func(*args, **kwargs)
+                except IntegrityError as e:
+                    logger.debug(f"Encountered '{e}', on attempt {attempt_count}")
+                    attempt_count += 1
+    return wrapper
 
 @dataclass(kw_only=True)
 class SzurubooruResource:
@@ -445,31 +679,75 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
     async def get_all_pools(self) -> list[resources.InternalPool]:
         raise NotImplementedError
 
-    async def push_tag(self, tag:resources.InternalTag, force_update:bool=False) -> resources.InternalTag:
-        tag_name = tag.names[0]
-        destination_tag = await self._get_tag(tag=tag_name)
-
-        if not destination_tag:
-            logger.info(f"Tag {tag_name} doesn't exist, creating")
-            new_tag = await self._create_tag(
-                names=tag.names,
-                tag_category=tag.category
-            )
-            return new_tag.to_resource()
-
-        tag_category_match = destination_tag.category == tag.category
-        tag_names_match = destination_tag.names == tag.names
-        if tag_category_match and tag_names_match:
-            logger.debug(f"Skipping update on tag '{tag_name}' as it already matches")
-            return destination_tag.to_resource()
-
-        merged_names = list(set(tag.names + destination_tag.names))
-        logger.info(f"Updating tag '{tag_name}' with names=({tag.names}), category=({tag.category})")
-        new_tag = await self._update_tag(
-            version_id=destination_tag.version,
-            names=merged_names,
-            tag_category=tag.category
+    @RetryOnWaitException
+    async def push_tag(self, tag:resources.InternalTag, replace_tags:bool=False, create_empty_tags:bool=True) -> resources.InternalTag:       
+        conflicting_tags = await self._get_conflicting_tags(
+            names=tag.names,
         )
+
+        if not conflicting_tags:
+            try:
+                new_tag = await self._create_tag(tag=tag)
+                return new_tag.to_resource()
+            except TagAlreadyExistsError as e:
+                logger.error(f"Tried to create tag '{tag}' but encountered unexpected error '{e}'")
+                return None
+
+        primary_tag = conflicting_tags[0]
+        primary_tag_name = primary_tag.names[0]
+        primary_tag_resource = primary_tag.to_resource()
+        tag_changes = tag.diff(resource=primary_tag_resource)
+
+        if not primary_tag.usages and not create_empty_tags:
+            return None
+
+        if not tag_changes:
+            logger.debug(f"Skipping update on tag '{primary_tag_name}' as it already matches")
+            return primary_tag_resource
+    
+        for conflicting_tag in conflicting_tags[1:]:
+            conflicting_tag_name = conflicting_tag.names[0]
+            if not conflicting_tag.usages:
+                logger.info(f"Deleting tag '{conflicting_tag_name}' as it conflicts with '{primary_tag_name}' and is unused")
+                await self._delete_tag(tag=conflicting_tag)
+                continue
+
+            try:
+                logger.info(f"Merging tag '{conflicting_tag_name}' into '{primary_tag.names[0]}'")
+                await self._merge_tag(
+                    from_tag=conflicting_tag, 
+                    to_tag=primary_tag
+                )
+            except TagNotFoundError as error:
+                await asyncio.sleep(5)
+                conflicting_tag = self._correct_first_tag(
+                    primary_tag_name=primary_tag_name,
+                    tag=conflicting_tag
+                )
+                await self._merge_tag(
+                    from_tag=conflicting_tag, 
+                    to_tag=primary_tag
+                )
+
+        if replace_tags:
+            desired_tag = primary_tag_resource.create_merged_copy(
+                update_object=tag,
+                allow_blank_values=True,
+                merge_where_possible=False
+            )
+        else:
+            desired_tag:resources.InternalTag = primary_tag_resource.create_merged_copy(update_object=tag)
+
+        try:
+            logger.info(f"Updating tag '{desired_tag.names[0]}' with names=({desired_tag.names}), category=({desired_tag.category})")
+            new_tag = await self._update_tag(tag=desired_tag)
+        except TagNotFoundError as error:
+            desired_tag = self._correct_first_tag(
+                primary_tag_name=primary_tag_name,
+                tag=desired_tag
+            )
+            await asyncio.sleep(5)
+            new_tag = await self._update_tag(tag=desired_tag)
 
         return new_tag.to_resource()
 
@@ -492,7 +770,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 try:
                     new_post = await self._create_post(post=post)
                     return new_post.to_resource()
-                except aiohttp.ClientResponseError as e:
+                except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as e:
                     logger.error(f"Error on post creation with '{e}' when creating post with resource {post}")
                     return None
 
@@ -512,6 +790,10 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         
         logger.debug("No local file found, looking for existing post")
         exact_post = await self.find_exact_post(post=post)
+        if not exact_post:
+            logger.error(f"No local file found, with no existing post. This shouldn't happen")
+            return None
+        
         logger.debug(f"Updating post with id={exact_post.id}")
         ignored_fields = [
             "id",
@@ -530,7 +812,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                     original_post=exact_post,
                     new_post=post
                 )
-            except aiohttp.ClientResponseError as error:
+            except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as error:
                 logger.error(f"Failed to update post with {error}")
                 return None
             return new_post.to_resource()
@@ -551,6 +833,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         
         return escaped_string
 
+    @SzurubooruErrorHandler
     async def _post_search(self, search_query:str, search_size:int=100, offset:int=0) -> PagedSearch[Post]:
         url = f"{self.URL_BASE}/api/posts/"
 
@@ -565,13 +848,18 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 headers=self.headers,
                 params=params
             ) as response:
+            try:
+                response.raise_for_status()
+            except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                err.message = await response.text()
+                raise err
             response_json = await response.json()
-            response.raise_for_status()
 
         post_search:PagedSearch[Post] = PagedSearch.from_dict(data=response_json, resource_type=Post)
 
         return post_search
 
+    @SzurubooruErrorHandler
     async def _tag_search(self, search_query:str, search_size:int=100, offset:int=0) -> PagedSearch[Tag]:
         url = f"{self.URL_BASE}/api/tags/"
         params = {
@@ -585,13 +873,18 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 headers=self.headers,
                 params=params
             ) as response:
+            try:
+                response.raise_for_status()
+            except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                err.message = await response.text()
+                raise err
             response_json = await response.json()
-            response.raise_for_status()
 
         tag_search:PagedSearch[Tag] = PagedSearch.from_dict(data=response_json, resource_type=Tag)
 
         return tag_search
 
+    @SzurubooruErrorHandler
     async def _pool_search(self, search_query:str, search_size:int=100, offset:int=0) -> PagedSearch[Pool]:
         url = f"{self.URL_BASE}/api/pools/"
         params = {
@@ -611,6 +904,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         
         return pool_search
 
+    @alru_cache(maxsize=1024, ttl=15)
+    @SzurubooruErrorHandler
     async def _get_tag(self, tag:str) -> Tag|None:
         safe_tag = urllib.parse.quote(tag)
         url = f"{self.URL_BASE}/api/tag/{safe_tag}"
@@ -619,8 +914,12 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 url=url,
                 headers=self.headers,
             ) as response:
+            try:
+                response.raise_for_status()
+            except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                err.message = await response.text()
+                raise err
             response_json = await response.json()
-            response.raise_for_status()
 
         if response_json:
             tag = Tag.from_dict(response_json)
@@ -628,47 +927,169 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         
         return None
 
-    async def _create_tag(self, names:list[str], tag_category:str="") -> Tag:
+    @SzurubooruErrorHandler
+    async def _create_tag(self, tag:resources.InternalTag) -> Tag:
         url = f"{self.URL_BASE}/api/tags"
 
         data = {
-            "names": names,
-            "category": tag_category
+            "names": tag.names,
+            "category": tag.category
         }
+
+        logger.debug(f"Creating tag [{", ".join(tag.names)}] with category '{tag.category}'")
+
+        if tag.implications:
+            implication_names = []
+            for implication in tag.implications:
+                implication_names.extend(implication.names)
+            data["implications"] = list(set(implication_names))
 
         async with self.session.post(
                 url=url,
                 headers=self.headers,
                 json=data
             ) as response:
+            try:
+                response.raise_for_status()
+            except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                err.message = await response.text()
+                raise err
             response_json = await response.json()
-            response.raise_for_status()
         
         tag = Tag.from_dict(response_json)
 
         return tag
 
-    async def _update_tag(self, version_id:int, names:list[str], tag_category:str="") -> Tag:
-        url = f"{self.URL_BASE}/api/tag/{names[0]}"
+    @SzurubooruErrorHandler
+    async def _update_tag(self, tag:resources.InternalTag) -> Tag:
+        safe_tag = urllib.parse.quote(tag.names[0])
+        url = f"{self.URL_BASE}/api/tag/{safe_tag}"
 
         data = {
-            "version": version_id,
-            "category": tag_category,
-            "names": names
+            "version": tag._extra[self._NAME]["version"],
+            "category": tag.category
         }
+
+        if tag.names:
+            data["names"] = list(tag.names)
+
+        if tag.implications:
+            implication_names = []
+            for implication in tag.implications:
+                implication_names.extend(implication.names)
+            data["implications"] = list(set(implication_names))
+
+        logger.debug(f"Attempting to update tag '{tag.names[0]}'")
 
         async with self.session.put(
                 url=url,
                 headers=self.headers,
                 json=data
             ) as response:
+            try:
+                response.raise_for_status()
+            except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                err.message = await response.text()
+                raise err
             response_json = await response.json()
-            response.raise_for_status()
 
         tag = Tag.from_dict(response_json)
 
         return tag
 
+    @SzurubooruErrorHandler
+    async def _delete_tag(self, tag:Tag) -> None:
+        safe_tag = urllib.parse.quote(tag.names[0])
+        url = f"{self.URL_BASE}/api/tag/{safe_tag}"
+
+        data = {
+            "version": tag.version,
+        }
+
+        logger.debug(f"Attempting to delete tag '{tag.names[0]}'")
+
+        async with self.session.delete(
+                url=url,
+                headers=self.headers,
+                json=data
+            ) as response:
+            try:
+                response.raise_for_status()
+            except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                err.message = await response.text()
+                raise err
+            response_json = await response.json()
+        
+        return None
+
+    @SzurubooruErrorHandler
+    async def _merge_tag(self, from_tag:Tag, to_tag:Tag) -> Tag:
+        url = f"{self.URL_BASE}/api/tag-merge/"
+
+        from_tag_name = from_tag.names[0]
+        to_tag_name = to_tag.names[0]
+
+        data = {
+            "removeVersion": from_tag.version,
+            "remove": from_tag_name,
+            "mergeToVersion": to_tag.version,
+            "mergeTo": to_tag_name,
+        }
+
+        logger.debug(f"Attempting to merge tag '{from_tag_name}' [v{from_tag.version}] into {to_tag_name} [v{to_tag.version}]")
+
+        async with self.session.post(
+                url=url,
+                headers=self.headers,
+                json=data
+            ) as response:
+            try:
+                response_json = await response.json()
+                response.raise_for_status()
+            except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                err.message = await response.text()
+                raise err
+
+        tag = Tag.from_dict(response_json)
+
+        return tag
+    
+    @SzurubooruErrorHandler
+    async def _get_conflicting_tags(self, names:list[str]) -> list[Tag]:
+        conflicting_tags:list[Tag] = []
+        all_found_names:set[str] = set()
+
+        for name in names:
+            if name in all_found_names:
+                continue
+
+            try:
+                found_tag:Tag = await self._get_tag(tag=name)
+            except TagNotFoundError:
+                continue
+
+            found_tag_names = set(found_tag.names)
+            names_already_found = found_tag_names.issubset(all_found_names)
+
+            logger.debug(f"Found a tag with the names {found_tag.names}")
+            if names_already_found:
+                continue
+
+            logger.debug(f"Found conflicting tag with {found_tag.names}")
+            conflicting_tags.append(found_tag)
+            all_found_names.update(found_tag_names)
+
+        return conflicting_tags
+    
+    def _correct_first_tag(self, primary_tag_name:str, tag:Tag|resources.InternalTag) -> Tag|resources.InternalTag:
+        logger.error(f"First tag does not exist, moving primary tag '{primary_tag_name}' to first tag of {tag.names}")
+        index_of_primary_tag = tag.names.index(primary_tag_name)
+        primary_name_value = tag.names.pop(index_of_primary_tag)
+        tag.names.insert(0, primary_name_value)
+
+        return tag
+
+    @SzurubooruErrorHandler
     async def _create_post(self, post:resources.InternalPost) -> Post:
         url = f"{self.URL_BASE}/api/posts/"
 
@@ -684,13 +1105,18 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 headers=self.headers,
                 json=data
             ) as response:
+            try:
+                response.raise_for_status()
+            except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                err.message = await response.text()
+                raise err
             response_json = await response.json()
-            response.raise_for_status()
 
         post = Post.from_dict(response_json)
 
         return post
 
+    @SzurubooruErrorHandler
     async def _update_post(self, original_post:resources.InternalPost, new_post:resources.InternalPost) -> Post:
         url = f"{self.URL_BASE}/api/post/{original_post.id}"
 
@@ -712,13 +1138,18 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 headers=self.headers,
                 json=data
             ) as response:
+            try:
+                response.raise_for_status()
+            except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                err.message = await response.text()
+                raise err
             response_json = await response.json()
-            response.raise_for_status()
 
         post = Post.from_dict(response_json)
 
         return post
     
+    @SzurubooruErrorHandler
     async def _retrieve_content_token(self, post:resources.InternalPost) -> str:
         content_token = post._extra[self._NAME].get("content_token")
         if content_token:
@@ -731,6 +1162,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         
         raise errors.MissingFile
 
+    @SzurubooruErrorHandler
     async def _upload_temporary_file(self, file:Path) -> str:
         """Upload the provided file to the Szurubooru temporary upload endpoint
 
@@ -752,13 +1184,19 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                     data=form
                 ) as response:
                 response_json = await response.json()
-                response.raise_for_status()
+                try:
+                    response.raise_for_status()
+                except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                    err.message = await response.text()
+                    raise err
 
         token:str = response_json["token"]
         
         logger.debug(f"Uploaded file to temporary endpoint with token={token}")
         return token
 
+    @alru_cache(maxsize=512, ttl=15)
+    @SzurubooruErrorHandler
     async def _reverse_image_search(self, content_token:str) -> ImageSearch[Post]:
         logger.debug("Doing reverse image search")
         url = f"{self.URL_BASE}/api/posts/reverse-search"
@@ -772,8 +1210,12 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 headers=self.headers,
                 json=data
             ) as response:
+            try:
+                response.raise_for_status()
+            except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                err.message = await response.text()
+                raise err
             response_json = await response.json()
-            response.raise_for_status()
 
         image_search:ImageSearch[Post] = ImageSearch.from_dict(data=response_json)
 
