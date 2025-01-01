@@ -47,6 +47,9 @@ class NewgroundsMeta(SharedAttributes, _plugin_template.MetadataPlugin):
     def get_id(self, metadata:dict) -> int:
         id:int = metadata['index']
         return id
+    
+    def get_sources(self, metadata:dict) -> list[str]:
+        raise NotImplementedError
 
     def get_description(self, metadata:dict) -> str:
         description:str = metadata.get("description", "")
