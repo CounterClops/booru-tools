@@ -60,6 +60,11 @@ class E621Meta(SharedAttributes, _plugin_template.MetadataPlugin):
         description:str = metadata.get("description", "")
         return description
 
+    def get_score(self, metadata:dict) -> int:
+        score:dict[str, int] = metadata.get("score", {})
+        total_score:int = score.get("total", 0)
+        return total_score
+
     def get_tags(self, metadata: dict) -> list[resources.InternalTag]:
         all_tags:list[resources.InternalTag] = []
 
