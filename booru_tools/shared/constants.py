@@ -10,6 +10,42 @@ class Category:
     LORE = "Lore"
     _DEFAULT = GENERAL
 
+    HEX_COLOURS = {
+        GENERAL: "#24aadd",
+        ARTIST: "#ffbc05",
+        CONTRIBUTOR: "#ff8604",
+        COPYRIGHT: "#820d8f",
+        CHARACTER: "#0e8f17",
+        SPECIES: "#8c1b1b",
+        INVALID: "#24aadd",
+        META: "#8f8f8f",
+        LORE: "#77c9bd",
+    }
+
+    ORDER = [
+        GENERAL,
+        ARTIST,
+        CONTRIBUTOR,
+        COPYRIGHT,
+        CHARACTER,
+        SPECIES,
+        INVALID,
+        META,
+        LORE
+    ]
+
+    @classmethod
+    def get_category_colour(cls, category:str) -> str:
+        try:
+            colour = cls.HEX_COLOURS[category]
+        except KeyError:
+            colour = cls.HEX_COLOURS[cls._DEFAULT]
+        return colour
+
+    @classmethod
+    def get_category_order_position(cls, category:str) -> int:
+        return cls.ORDER.index(category)
+
 class Safety:
     SAFE = "safe"
     SKETCHY = "sketchy"
