@@ -19,7 +19,7 @@ class GracefulExit(SystemExit):
 class SessionManager:
     def __init__(self):
         self.session = None
-        self.limit_per_host = 40
+        self.limit_per_host = 50
         self.default_headers = {
             "User-Agent": "BooruTools/1.0"
         }
@@ -117,7 +117,7 @@ class BooruTools:
     async def update_tags(self, tags:list[resources.InternalTag]):
         logger.info(f"Updating {len(tags)} tags")
         chunk_count = 0
-        chunk_size = 100
+        chunk_size = 500
         for tags_chunk in self.divide_chunks(tags, chunk_size):
             chunk_count += 1
             logger.debug(f"Processing chunk {chunk_count} ({len(tags_chunk)}/{chunk_size}) of {len(tags)} tags")

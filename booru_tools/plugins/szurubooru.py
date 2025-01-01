@@ -592,7 +592,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         self.image_distance_threshold = 0.15
         logger.debug(f'url_base = {self.URL_BASE}')
         self.rate_limiter = AsyncLimiter(
-            max_rate=100,
+            max_rate=200,
             time_period=60
         )
     
