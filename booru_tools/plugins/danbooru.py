@@ -56,6 +56,10 @@ class DanbooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
     def get_description(self, metadata:dict) -> str:
         description:str = metadata.get("description", "")
         return description
+    
+    def get_score(self, metadata:dict) -> int:
+        score:int = metadata.get("score", 0)
+        return score
 
     def get_tags(self, metadata:dict[str, any]) -> list[resources.InternalTag]:
         all_tags:list[resources.InternalTag] = []
