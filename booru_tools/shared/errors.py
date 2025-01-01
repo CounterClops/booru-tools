@@ -13,12 +13,15 @@ class PostExists(Exception):
 class MissingFile(Exception):
     pass
 
+### HTTP errors
+
 class InternalServerError(Exception):
     pass
 
-# class HttpRetyLater(Exception):
-#     def __init__(self, message:str="Retry later", delay_time:int=60, retry_limit:int=6):
-#         self.message = message
-#         self.delay_time = delay_time
-#         self.retry_limit = retry_limit
-#         super().__init__(self.message)
+class TooManyRequestsError(Exception):
+    pass
+
+HTTP_CODE_MAP = {
+    429: TooManyRequestsError,
+    500: InternalServerError
+}

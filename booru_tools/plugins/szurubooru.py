@@ -4,6 +4,9 @@ from pathlib import Path
 from datetime import datetime
 from loguru import logger
 from async_lru import alru_cache
+from aiolimiter import AsyncLimiter
+from copy import deepcopy
+
 import urllib.parse
 import asyncio
 import aiohttp
@@ -195,10 +198,6 @@ ERROR_MAP = {
     "ValidationError": ValidationError
 }
 
-HTTP_CODE_MAP = {
-    500: errors.InternalServerError
-}
-
 P = ParamSpec("P")
 R = TypeVar('R') # , bound=Awaitable[Any]
 
@@ -216,7 +215,7 @@ def SzurubooruErrorHandler(func: Callable[P, Awaitable[R]]) -> Callable[P, Await
                 message = f"HTTP Error {error.status}: '{szurubooru_error_name}' {szurubooru_error_description}"
                 raise szurubooru_error_class(message)
             except json.decoder.JSONDecodeError:
-                szurubooru_error_class = HTTP_CODE_MAP.get(error.status, None)
+                szurubooru_error_class = errors.HTTP_CODE_MAP.get(error.status, None)
                 if szurubooru_error_class:
                     raise szurubooru_error_class(f"Failed to decode error message. Full response text is '{error.message}'")
                 logger.critical(f"Failed to decode error message. Full response text is '{error.message}'")
@@ -225,7 +224,7 @@ def SzurubooruErrorHandler(func: Callable[P, Awaitable[R]]) -> Callable[P, Await
                 raise error
     return wrapper
 
-def RetryOnWaitException(func: Callable[P, R]) -> Callable[P, R]:
+def RetryOnWaitException(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
     @functools.wraps(func)
     async def wrapper(*args: Any, **kwargs: Any) -> R:
         try:
@@ -592,6 +591,10 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         self.session = session
         self.image_distance_threshold = 0.15
         logger.debug(f'url_base = {self.URL_BASE}')
+        self.rate_limiter = AsyncLimiter(
+            max_rate=100,
+            time_period=60
+        )
     
     @property
     def token(self):
@@ -681,6 +684,9 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
     @RetryOnWaitException
     async def push_tag(self, tag:resources.InternalTag, replace_tags:bool=False, create_empty_tags:bool=True) -> resources.InternalTag:       
+        # Work around as szurubooru returns a 500 error if tag names exceed 190 names
+        tag.names = tag.names[:189]
+        
         conflicting_tags = await self._get_conflicting_tags(
             names=tag.names,
         )
@@ -738,8 +744,12 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         else:
             desired_tag:resources.InternalTag = primary_tag_resource.create_merged_copy(update_object=tag)
 
+        # Work around as szurubooru returns a 500 error if tag names exceed 190 names
+        desired_tag.names = desired_tag.names[:189]
+
         try:
-            logger.info(f"Updating tag '{desired_tag.names[0]}' with names=({desired_tag.names}), category=({desired_tag.category})")
+            desired_tag_name = desired_tag.names[0]
+            logger.info(f"Updating tag '{desired_tag_name}' with names=({desired_tag.names}), category=({desired_tag.category}), implications=({desired_tag.implications})")
             new_tag = await self._update_tag(tag=desired_tag)
         except TagNotFoundError as error:
             desired_tag = self._correct_first_tag(
@@ -748,6 +758,18 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             )
             await asyncio.sleep(5)
             new_tag = await self._update_tag(tag=desired_tag)
+        except InvalidTagRelationError as error:
+            logger.error(f"Tag '{desired_tag_name}' update failed with {error}")
+            return None
+        except TagAlreadyExistsError as error:
+            logger.error(f"Tag '{desired_tag_name}' update failed with {error}. This is likely due to tag alias being in added as implications")
+            desired_tag_trimmed = deepcopy(desired_tag)
+            desired_tag_trimmed.names = [desired_tag_name]
+            logger.info(f"Temporarily setting tag {desired_tag_name} to 1 alias, before updating to include {desired_tag.names}")
+            await self._update_tag(tag=desired_tag_trimmed)
+            await asyncio.sleep(2)
+            new_tag = await self._update_tag(tag=desired_tag)
+
 
         return new_tag.to_resource()
 
@@ -847,7 +869,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 url=url,
                 headers=self.headers,
                 params=params
-            ) as response:
+            ) as response, self.rate_limiter:
             try:
                 response.raise_for_status()
             except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
@@ -872,7 +894,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 url=url,
                 headers=self.headers,
                 params=params
-            ) as response:
+            ) as response, self.rate_limiter:
             try:
                 response.raise_for_status()
             except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
@@ -897,7 +919,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 url=url,
                 headers=self.headers,
                 params=params
-            ) as response:
+            ) as response, self.rate_limiter:
             response_json = await response.json()
 
         pool_search:PagedSearch[Pool] = PagedSearch.from_dict(data=response_json, resource_type=Pool)
@@ -948,7 +970,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 url=url,
                 headers=self.headers,
                 json=data
-            ) as response:
+            ) as response, self.rate_limiter:
             try:
                 response.raise_for_status()
             except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
@@ -985,7 +1007,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 url=url,
                 headers=self.headers,
                 json=data
-            ) as response:
+            ) as response, self.rate_limiter:
             try:
                 response.raise_for_status()
             except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
@@ -1012,7 +1034,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 url=url,
                 headers=self.headers,
                 json=data
-            ) as response:
+            ) as response, self.rate_limiter:
             try:
                 response.raise_for_status()
             except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
@@ -1042,7 +1064,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 url=url,
                 headers=self.headers,
                 json=data
-            ) as response:
+            ) as response, self.rate_limiter:
             try:
                 response_json = await response.json()
                 response.raise_for_status()
@@ -1104,7 +1126,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 url=url,
                 headers=self.headers,
                 json=data
-            ) as response:
+            ) as response, self.rate_limiter:
             try:
                 response.raise_for_status()
             except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
@@ -1137,7 +1159,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 url=url,
                 headers=self.headers,
                 json=data
-            ) as response:
+            ) as response, self.rate_limiter:
             try:
                 response.raise_for_status()
             except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
@@ -1182,7 +1204,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                     url=url,
                     headers=self.headers,
                     data=form
-                ) as response:
+                ) as response, self.rate_limiter:
                 response_json = await response.json()
                 try:
                     response.raise_for_status()
@@ -1209,7 +1231,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 url=url,
                 headers=self.headers,
                 json=data
-            ) as response:
+            ) as response, self.rate_limiter:
             try:
                 response.raise_for_status()
             except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:

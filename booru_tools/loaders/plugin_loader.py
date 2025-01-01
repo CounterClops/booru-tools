@@ -70,7 +70,7 @@ class PluginLoader:
             # Find classes in the module that are subclasses of `self.plugin_class`
             for name, obj in inspect.getmembers(module, inspect.isclass):
                 if issubclass(obj, self.plugin_class) and obj != self.plugin_class:
-                    logger.debug(f"Loaded '{obj.__class__.__name__}' as '{name}'")
+                    logger.debug(f"Loaded plugin '{name}' of type '{self.plugin_class}'")
                     plugin = InternalPlugin(
                         name=name,
                         module_name=module_name,

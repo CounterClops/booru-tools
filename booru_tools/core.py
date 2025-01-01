@@ -4,7 +4,6 @@ from loguru import logger
 from collections import defaultdict
 import json
 import shutil
-import time
 
 import asyncio
 import aiohttp
@@ -20,10 +19,21 @@ class GracefulExit(SystemExit):
 class SessionManager:
     def __init__(self):
         self.session = None
+        self.limit_per_host = 20
+        self.default_headers = {
+            "User-Agent": "BooruTools/1.0"
+        }
 
     def start(self) -> aiohttp.ClientSession:
+        connector = aiohttp.TCPConnector(
+            limit_per_host=self.limit_per_host
+        )
         if not self.session or self.session.closed:
-            self.session = aiohttp.ClientSession()
+            self.session = aiohttp.ClientSession(
+                headers=self.default_headers,
+                skip_auto_headers=self.default_headers.keys(),
+                connector=connector
+            )
         return self.session
 
     async def close(self):
@@ -107,7 +117,26 @@ class BooruTools:
     async def update_tags(self, tags:list[resources.InternalTag]):
         logger.info(f"Updating {len(tags)} tags")
 
-        # for tag in self.implicate_tags(tags):
+        # tasks:list[asyncio.Task] = []
+
+        # for tag in tags:
+        #     task = asyncio.create_task(
+        #         self.destination_plugin.push_tag(tag=tag)
+        #     )
+        #     tasks.append(task)
+        
+        # await asyncio.gather(*tasks, return_exceptions=True)
+
+        # for task in tasks:
+        #     try:
+        #         task.result()
+        #     except KeyError as e:
+        #         logger.warning(f"Error updating the tag '{tag}' due to {e}")
+        #         exit()
+        #     except errors.InternalServerError as error:
+        #         logger.critical(f"Unable to update tag {tag} due to {error}")
+        #         continue
+
         for tag in tags:
             logger.debug(f"Updating tag '{tag}' to category '{tag.category}'")
             try:
@@ -140,6 +169,7 @@ class BooruTools:
             "category": post_category,
             "sources": metadata_plugin.get_sources(metadata=metadata),
             "description": metadata_plugin.get_description(metadata=metadata),
+            "score": metadata_plugin.get_score(metadata=metadata),
             "tags": metadata_plugin.get_tags(metadata=metadata),
             "created_at": metadata_plugin.get_created_at(metadata=metadata),
             "updated_at": metadata_plugin.get_updated_at(metadata=metadata),
