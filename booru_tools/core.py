@@ -19,7 +19,7 @@ class GracefulExit(SystemExit):
 class SessionManager:
     def __init__(self):
         self.session = None
-        self.limit_per_host = 20
+        self.limit_per_host = 40
         self.default_headers = {
             "User-Agent": "BooruTools/1.0"
         }
@@ -117,16 +117,15 @@ class BooruTools:
     async def update_tags(self, tags:list[resources.InternalTag]):
         logger.info(f"Updating {len(tags)} tags")
 
-        tasks:list[asyncio.Task] = []
-
-        async with asyncio.TaskGroup() as task_group:
-            for tag in tags:
-                task = task_group.create_task(
-                    self.destination_plugin.push_tag(tag=tag)
-                )
-                tasks.append(task)
-        
-        results = [task.result() for task in tasks]
+        for tags_chunk in self.divide_chunks(tags, 50):
+            tasks:list[asyncio.Task] = []
+            async with asyncio.TaskGroup() as task_group:
+                for tag in tags_chunk:
+                    task = task_group.create_task(
+                        self.destination_plugin.push_tag(tag=tag)
+                    )
+                    tasks.append(task)
+            results = [task.result() for task in tasks]
 
         # tasks:list[asyncio.Task] = []
 
@@ -264,6 +263,11 @@ class BooruTools:
             else:
                 tags.append(tag)
         return tags
+    
+    @staticmethod
+    def divide_chunks(array:list, max_size:int):
+        for i in range(0, len(array), max_size): 
+            yield array[i:i + max_size]
     
     def override_plugin_config(self, plugin:object, plugin_override:str=""):
         override_pairs = plugin_override.split(",")
