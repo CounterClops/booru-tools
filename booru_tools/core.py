@@ -116,8 +116,11 @@ class BooruTools:
 
     async def update_tags(self, tags:list[resources.InternalTag]):
         logger.info(f"Updating {len(tags)} tags")
-
-        for tags_chunk in self.divide_chunks(tags, 50):
+        chunk_count = 0
+        chunk_size = 100
+        for tags_chunk in self.divide_chunks(tags, chunk_size):
+            chunk_count += 1
+            logger.debug(f"Processing chunk {chunk_count} ({len(tags_chunk)}/{chunk_size}) of {len(tags)} tags")
             tasks:list[asyncio.Task] = []
             async with asyncio.TaskGroup() as task_group:
                 for tag in tags_chunk:
