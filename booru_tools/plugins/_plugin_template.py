@@ -10,6 +10,9 @@ from booru_tools.shared import resources, errors, constants
 from booru_tools.plugins import _base
 
 class MetadataPlugin(_base.PluginBase):
+    def __init__(self):
+        logger.debug(f"Loaded {self.__class__.__name__}")
+
     def get_id(self, metadata:dict) -> int:
         raise NotImplementedError
 
@@ -17,6 +20,9 @@ class MetadataPlugin(_base.PluginBase):
         raise NotImplementedError
 
     def get_description(self, metadata:dict) -> str:
+        raise NotImplementedError
+
+    def get_score(self, metadata:dict) -> int:
         raise NotImplementedError
 
     def get_tags(self, metadata:dict) -> list[resources.InternalTag]:
@@ -48,6 +54,9 @@ class ValidationPlugin(_base.PluginBase):
     USER_URL_PATTERN:re.Pattern = None
     POOL_URL_PATTERN:re.Pattern = None
     GLOBAL_URL_PATTERN:re.Pattern = None
+
+    def __init__(self):
+        logger.debug(f"Loaded {self.__class__.__name__}")
 
     def get_source_type(self, url:str):
         if self.POST_URL_PATTERN:
@@ -107,7 +116,7 @@ class ApiPlugin(_base.PluginBase):
     async def find_exact_tag(self, tag:resources.InternalTag) -> resources.InternalTag | None:
         raise NotImplementedError
     
-    async def get_all_tags(self, treat_aliases_as_implications:bool=True) -> list[resources.InternalTag]:
+    async def get_all_tags(self, treat_aliases_as_implications:bool=False) -> list[resources.InternalTag]:
         raise NotImplementedError
     
     async def get_all_pools(self) -> list[resources.InternalPool]:

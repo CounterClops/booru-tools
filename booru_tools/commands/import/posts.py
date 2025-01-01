@@ -26,7 +26,8 @@ class ImportPostsCommand():
                 match_source:bool=True, 
                 plugin_override:str="", 
                 download_page_size:int=100,
-                allowed_safety:str=""
+                allowed_safety:str="",
+                minimum_score:int=0
             ):
         booru_config = {
             "destination": destination
@@ -65,6 +66,7 @@ class ImportPostsCommand():
         self.required_tags = self.booru_tools.split_tag_list(required_tags)
         self.allowed_blank_pages = allowed_blank_pages
         self.download_page_size = download_page_size
+        self.minimum_score = minimum_score
 
         self.allowed_safety = []
         for safety in allowed_safety.split(","):
@@ -116,6 +118,9 @@ class ImportPostsCommand():
             return False
         if self.allowed_safety and (post.safety not in self.allowed_safety):
             logger.debug(f"Post '{post.id}' is not in the allowed safety selection from {self.allowed_safety}")
+            return False
+        if self.minimum_score and post.score < self.minimum_score:
+            logger.debug(f"Post '{post.id}' has a score of {post.score} which is below the minimum score of {self.minimum_score}")
             return False
         logger.debug(f"Post '{post.id}' passed all checks")
         return True
@@ -188,6 +193,7 @@ class ImportPostsCommand():
 @click.option('--cookies', type=Path, help='The cookies to use for this download')
 @click.option('--blacklisted-tags', type=str, default="", help="A comma seperated list of tags to blacklist, you can specify an AND condition with |")
 @click.option('--required-tags', type=str, default="", help="A comma seperated list of tags to require on all posts, you can specify an AND condition with |")
+@click.option('--minimum-score', type=int, default=0, help="The minimum score a post must have to be imported")
 @click.option('--match-source/--ignore-source', default=True, help="Whether post source should be used when importing")
 @click.option('--allowed-blank-pages', type=int, default=1, help="Number of pages to download post pages before stopping")
 @click.option('--plugin-override', type=str, help="Provide plugin override values")
