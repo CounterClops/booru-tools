@@ -160,6 +160,9 @@ class InternalTag(InternalResource):
     def __repr__(self):
         return f"InternalTag(name={self.names}, category={self.category}, implications={self.implications})"
     
+    def __hash__(self):
+        return hash(f"{set(self.names)}/{self.category}/{set(self.implications)}")
+    
     def all_tag_strings(self) -> list[str]:
         tag_strings = set(self.names)
         for tag in self.implications:

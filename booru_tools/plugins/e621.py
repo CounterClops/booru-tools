@@ -210,6 +210,11 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
                     continue
                 name = tag_alias["consequent_name"]
                 alias = tag_alias["antecedent_name"]
+
+                if alias in tags and name in tags:
+                    self._merge_tags(tags=tags, from_name=alias, to_name=name)
+                    continue
+
                 if treat_aliases_as_implications:
                     tags = self._add_implication(
                         tags=tags,
@@ -222,10 +227,6 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
                         name=name,
                         alias=alias
                     )
-        
-        print(f"{[tags['dog_food']]}")
-        print(f"{[tags['pet_food']]}")
-        exit()
 
         with gzip.open(tag_implications_export_archive, "rt") as tag_implications_gz:
             logger.info(f"Processing tag implications from {tags_export_archive}")
@@ -242,8 +243,8 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
                     name=name,
                     implication=implication
                 )
-            
-        return tags.values()
+        
+        return list(set(tags.values()))
     
     async def get_all_pools(self) -> list[resources.InternalPool]:
         pools_export_archive = await self._download_latest_db_export(filename_string="pools-")
@@ -362,6 +363,25 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
             tags[name].names.append(alias)
         except KeyError:
             logger.debug(f"Skipping alias '{alias}' as the tag '{name}' didn't exist")
+        return tags
+    
+    def _merge_tags(self, tags:dict[str, resources.InternalTag], from_name:str, to_name:str):
+        from_tag = tags.pop(from_name)
+        to_tag = tags[to_name]
+
+        for tag_name in from_tag.names:
+            if tag_name not in to_tag.names:
+                logger.debug(f"Adding name '{tag_name}' to '{to_name}'")
+                to_tag.names.append(tag_name)
+
+        for implication in from_tag.implications:
+            if not any(tag_name in implication.names for tag_name in to_tag.names):
+                logger.warning(f"Skipping implication '{implication}' as it already exists in names/aliases of '{to_name}'")
+                continue
+            to_tag.implications.append(implication)
+        
+        tags[from_name] = to_tag
+
         return tags
 
 class E621Validator(SharedAttributes, _plugin_template.ValidationPlugin):
