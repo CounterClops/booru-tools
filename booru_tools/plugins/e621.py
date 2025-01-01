@@ -331,7 +331,7 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
 
     @alru_cache(ttl=120)
     async def _get_db_export_links(self) -> list[str]:
-        url = f"{self.URL_BASE}/db_export/"
+        url = "https://e621.net/db_export/"
         export_file_extension = ".csv.gz"
         
         async with self.session.get(
