@@ -762,7 +762,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             logger.error(f"Tag '{desired_tag_name}' update failed with {error}")
             return None
         except TagAlreadyExistsError as error:
-            logger.error(f"Tag '{desired_tag_name}' update failed with {error}. This is likely due to tag alias being in added as implications")
+            logger.error(f"Tag '{desired_tag_name}' update failed with {error}. This is likely due to tag alias also being added as implications")
             desired_tag_trimmed = deepcopy(desired_tag)
             desired_tag_trimmed.names = [desired_tag_name]
             logger.info(f"Temporarily setting tag {desired_tag_name} to 1 alias, before updating to include {desired_tag.names}")
