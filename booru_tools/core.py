@@ -120,7 +120,7 @@ class BooruTools:
         chunk_size = 500
         for tags_chunk in self.divide_chunks(tags, chunk_size):
             chunk_count += 1
-            logger.debug(f"Processing chunk {chunk_count} ({len(tags_chunk)}/{chunk_size}) of {len(tags)} tags")
+            logger.info(f"Processing chunk {chunk_count} ({len(tags_chunk)}/{chunk_size}) of {len(tags)} tags")
             tasks:list[asyncio.Task] = []
             async with asyncio.TaskGroup() as task_group:
                 for tag in tags_chunk:
