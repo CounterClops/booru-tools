@@ -118,9 +118,11 @@ class BooruTools:
         logger.info(f"Updating {len(tags)} tags")
         chunk_count = 0
         chunk_size = 500
+        total_tags = len(tags)
         for tags_chunk in self.divide_chunks(tags, chunk_size):
             chunk_count += 1
-            logger.info(f"Processing chunk {chunk_count} ({len(tags_chunk)}/{chunk_size}) of {len(tags)} tags")
+            completion_percent = int(((chunk_count * chunk_size) / total_tags) * 100)
+            logger.info(f"Processing chunk {chunk_count} ({len(tags_chunk)}/{chunk_size}) of {total_tags} tags ({completion_percent}%)")
             tasks:list[asyncio.Task] = []
             async with asyncio.TaskGroup() as task_group:
                 for tag in tags_chunk:
