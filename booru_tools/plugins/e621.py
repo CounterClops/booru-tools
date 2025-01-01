@@ -340,14 +340,13 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
         return file_links
 
     def _add_implication(self, tags:dict[str, resources.InternalTag], name:str, implication:str):
-
-        if implication in tags[name].names:
-            logger.warning(f"Skipping implication '{implication}' as it already exists in names/aliases of '{name}'")
-            return tags
-
         logger.debug(f"Adding implication '{implication}' to '{name}'")
         try:
-            tags[name].implications.append(tags[implication])
+            tag = tags[name]
+            if implication in tag.names:
+                logger.warning(f"Skipping implication '{implication}' as it already exists in names/aliases of '{name}'")
+                return tags
+            tag.implications.append(tags[implication])
         except KeyError:
             logger.debug(f"Skipping implication '{implication}' as the tag '{name}' or '{implication}' didn't exist")
         return tags
