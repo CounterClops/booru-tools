@@ -117,6 +117,17 @@ class BooruTools:
     async def update_tags(self, tags:list[resources.InternalTag]):
         logger.info(f"Updating {len(tags)} tags")
 
+        tasks:list[asyncio.Task] = []
+
+        async with asyncio.TaskGroup() as task_group:
+            for tag in tags:
+                task = task_group.create_task(
+                    self.destination_plugin.push_tag(tag=tag)
+                )
+                tasks.append(task)
+        
+        results = [task.result() for task in tasks]
+
         # tasks:list[asyncio.Task] = []
 
         # for tag in tags:
@@ -137,16 +148,16 @@ class BooruTools:
         #         logger.critical(f"Unable to update tag {tag} due to {error}")
         #         continue
 
-        for tag in tags:
-            logger.debug(f"Updating tag '{tag}' to category '{tag.category}'")
-            try:
-                await self.destination_plugin.push_tag(tag=tag)
-            except KeyError as e:
-                logger.warning(f"Error updating the tag '{tag}' due to {e}")
-                exit()
-            except errors.InternalServerError as error:
-                logger.critical(f"Unable to update tag {tag} due to {error}")
-                continue
+        # for tag in tags:
+        #     logger.debug(f"Updating tag '{tag}' to category '{tag.category}'")
+        #     try:
+        #         await self.destination_plugin.push_tag(tag=tag)
+        #     except KeyError as e:
+        #         logger.warning(f"Error updating the tag '{tag}' due to {e}")
+        #         exit()
+        #     except errors.InternalServerError as error:
+        #         logger.critical(f"Unable to update tag {tag} due to {error}")
+        #         continue
 
     def create_post_from_metadata(self, metadata:resources.Metadata, download_link:str) -> resources.InternalPost:
         try:
