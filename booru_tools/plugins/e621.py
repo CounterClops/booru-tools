@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from async_lru import alru_cache
 import gzip, csv
 import aiohttp
+import asyncio
 import re
 import functools
 import requests
@@ -221,7 +222,11 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
                         name=name,
                         alias=alias
                     )
-            
+        
+        print(f"{[tags['dog_food']]}")
+        print(f"{[tags['pet_food']]}")
+        exit()
+
         with gzip.open(tag_implications_export_archive, "rt") as tag_implications_gz:
             logger.info(f"Processing tag implications from {tags_export_archive}")
             tag_implications_csv_reader = csv.DictReader(tag_implications_gz)
