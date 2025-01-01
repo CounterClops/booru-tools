@@ -10,7 +10,7 @@ class SharedAttributes:
     _CATEGORY = [
         "rule34"
     ]
-    _NAME = "bluesky"
+    _NAME = "rule34"
 
     URL_BASE = "https://rule34.xxx"
 
@@ -20,7 +20,7 @@ class SharedAttributes:
     
     POST_CATEGORY_MAP = {}
 
-class Rule34Validator(SharedAttributes, _plugin_template.ValidationPlugin):
+class Rule34XxxValidator(SharedAttributes, _plugin_template.ValidationPlugin):
     POST_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z0-9.-]+\/index.php.+post.+)|(https:\/\/[a-zA-Z0-9.-]+\/+images\/.+)")
     GLOBAL_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z0-9.-]+\/?$)")
     
