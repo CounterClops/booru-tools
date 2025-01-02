@@ -119,8 +119,12 @@ class E621Meta(SharedAttributes, _plugin_template.MetadataPlugin):
 
     def get_post_url(self, metadata:dict) -> str:
         post_id = metadata["id"]
-        url = f"{self.URL_BASE}/posts/{post_id}"
+        url = self._generate_post_url(post_id=post_id)
         logger.debug(f"Generated the post URL '{url}'")
+        return url
+
+    def _generate_post_url(self, post_id:int) -> str:
+        url = f"{self.URL_BASE}/posts/{post_id}"
         return url
 
     def get_pools(self, metadata:dict) -> list[resources.InternalPool]:
@@ -250,6 +254,7 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
         pools_export_archive = await self._download_latest_db_export(filename_string="pools-")
 
         pools:list[resources.InternalPool] = []
+        e621_metadata_plugin = E621Meta()
 
         with gzip.open(pools_export_archive, "rt") as pools_gz:
             pools_csv_reader = csv.DictReader(pools_gz)
@@ -258,8 +263,11 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
                 if pool.get("is_active", "f") != "t":
                     continue
                 
+                pool_id = int(pool["id"])
+                logger.info(f"Processing pool {pool_id}")
+
                 pool_data = {
-                    "id": int(pool["id"]),
+                    "id": pool_id,
                     "name": pool["name"],
                     "created_at": datetime.fromisoformat(pool["created_at"]),
                     "updated_at": datetime.fromisoformat(pool["updated_at"]),
@@ -268,7 +276,15 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
                 }
 
                 post_ids:list[str] = pool["post_ids"].strip("{}").split(",")
-                pool_data["posts"] = [{"id": post_id} for post_id in post_ids]
+                posts = []
+                for post_id in post_ids:
+                    post = {
+                        "id": post_id,
+                        "post_url": e621_metadata_plugin._generate_post_url(post_id),
+                        "origin": self._NAME
+                    }
+                    posts.append(post)
+                pool_data["posts"] = posts
 
                 pools.append(resources.InternalPool.from_dict(pool_data))
             
