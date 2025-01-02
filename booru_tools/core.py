@@ -70,6 +70,7 @@ class BooruTools:
             loop.stop()
         except RuntimeError:
             logger.debug("No async loop")
+        self.cleanup_process_directories()
         logger.info("Gracefully shutdown")
         raise GracefulExit()
     
@@ -99,20 +100,27 @@ class BooruTools:
             self.destination_plugin:_plugin_template.ApiPlugin = self.api_loader.load_matching_plugin(domain=self.config["destination"], category=self.config["destination"])
     
     async def update_posts(self, posts:list[resources.InternalPost]):
-        for post in posts:
-            if not post.local_file:
-                logger.debug(f"No file to upload for '{post.id}'")
-            else:
-                logger.debug(f"Uploading {post.local_file.name} for '{post.id}'")
+        logger.info(f"Updating {len(posts)} posts")
 
-            if post.post_url:
-                logger.debug(f"Updating post ({post.id}) sources with '{post.post_url}'")
-                post.sources.append(post.post_url)
+        tasks:list[asyncio.Task] = []
+        async with asyncio.TaskGroup() as task_group:
+            for post in posts:
+                if not post.local_file:
+                    logger.debug(f"No file to upload for '{post.id}'")
+                else:
+                    logger.debug(f"File {post.local_file.name} found for '{post.id}'")
 
-            logger.debug(f"Updating post '{post.id}'")
-            await self.destination_plugin.push_post(
-                post=post
-            )
+                if post.post_url:
+                    if post.post_url not in post.sources:
+                        logger.debug(f"Updating post ({post.id}) sources with '{post.post_url}'")
+                        post.sources.append(post.post_url)
+
+                logger.debug(f"Updating post '{post.id}'")
+                task = task_group.create_task(
+                    self.destination_plugin.push_post(post=post)
+                )
+                tasks.append(task)
+        results = [task.result() for task in tasks]
 
     async def update_tags(self, tags:list[resources.InternalTag]):
         logger.info(f"Updating {len(tags)} tags")

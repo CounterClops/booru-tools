@@ -72,13 +72,15 @@ class InternalResource:
         valid_keys = {field.name for field in fields(cls)}
         filtered_data = {key: value for key, value in data.items() if key in valid_keys}
         return filtered_data
+        
+    def merge_resource(self, update_object:"InternalResource", allow_blank_values:bool=False, merge_where_possible:bool=True, deep_copy:bool=True) -> "InternalResource":
+        if deep_copy:
+            resource = deepcopy(self)
+        else:
+            resource = self
 
-    def update_attributes(self, update_object:"InternalResource", allow_blank_values:bool=False, merge_where_possible:bool=False) -> None:
-        """Updates the object with the provided objects attributes, ignores default values and base fields
-
-        Args:
-            update_object (InternalResource): The new object to replace attributes in the source with
-        """
+        base_fields = [field.name for field in fields(InternalResource)]
+        
         for field in fields(update_object):
             new_value = getattr(update_object, field.name)
             
@@ -87,15 +89,13 @@ class InternalResource:
                 continue
             if field.default_factory is not MISSING and new_value == field.default_factory():
                 continue
-            if field.name in ["plugins", "metadata", "_extra"]:
+            if field.name in base_fields and not field.name.startswith("_"):
                 continue
-
-            if not allow_blank_values:
-                if not new_value:
-                    continue
+            if (not allow_blank_values) and (not new_value):
+                continue
             
             if merge_where_possible:
-                old_value = getattr(self, field.name)
+                old_value = getattr(resource, field.name)
                 if isinstance(old_value, list):
                     for value in new_value:
                         if value in old_value:
@@ -104,18 +104,11 @@ class InternalResource:
                 if isinstance(old_value, dict):
                     old_value.update(new_value)
 
-            setattr(self, field.name, new_value)
+            setattr(resource, field.name, new_value)
+        
+        return resource
     
-    def create_merged_copy(self, update_object:"InternalResource", allow_blank_values:bool=False, merge_where_possible:bool=True) -> "InternalResource":
-        self_copy = deepcopy(self)
-        self_copy.update_attributes(
-            update_object=update_object,
-            allow_blank_values=allow_blank_values,
-            merge_where_possible=merge_where_possible
-        )
-        return self_copy
-    
-    def diff(self, resource:"InternalResource", fields_to_ignore:list=[]) -> dict:
+    def diff(self, resource:"InternalResource", fields_to_ignore:list=[]) -> dict[str, Any]:
         diff = {}
         ignored_fields = self._default_diff_ignored_fields + fields_to_ignore
         for field in fields(self):

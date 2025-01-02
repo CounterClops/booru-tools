@@ -83,7 +83,7 @@ class ImportPostsCommand():
             except Exception as e:
                 logger.critical(f"url import failed with {e}")
 
-        await self.booru_tools.update_tags(tags=self.all_tags)
+        # await self.booru_tools.update_tags(tags=self.all_tags)
         
         self.booru_tools.cleanup_process_directories()
         await self.booru_tools.session_manager.close()
@@ -139,14 +139,12 @@ class ImportPostsCommand():
                 logger.info(f"Skipping '{post.id}' as it is not allowed with current config")
                 continue
 
-            all_posts.append(post)
-
             existing_post = await self.booru_tools.destination_plugin.find_exact_post(post=post)
             if not existing_post:
                 logger.info(f"Queuing up '{post.post_url}' for download")
                 posts_to_download.append(post)
             else:
-                post:resources.InternalPost = existing_post.create_merged_copy(update_object=post)
+                post:resources.InternalPost = existing_post.merge_resource(update_object=post, deep_copy=False)
                 all_posts.append(post)
 
             # Process tag category data
