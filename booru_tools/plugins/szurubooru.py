@@ -833,7 +833,11 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
     @errors.log_all_errors
     async def push_post(self, post:resources.InternalPost, force_update:bool=False) -> resources.InternalPost:
         if post.local_file:
-            content_token = await self._retrieve_content_token(post=post)
+            try:
+                content_token = await self._retrieve_content_token(post=post)
+            except errors.MissingFile as error:
+                logger.error(f"{error}: Local file was was set on '{post.id}' failed to get content_token")
+                return None
 
             logger.debug(f"Content token found '{content_token}', doing reverse image search")
             similar_posts = await self.find_similar_posts(post=post)
@@ -1166,11 +1170,17 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
     async def _create_post(self, post:resources.InternalPost) -> Post:
         url = f"{self.URL_BASE}/api/posts/"
 
+        try:
+            content_token = await self._retrieve_content_token(post=post)
+        except errors.MissingFile as error:
+            logger.error(f"{error}: Local file was set on '{post.id}' failed to get content_token")
+            return None
+
         data = {
             "tags": post.str_tags,
             "safety": post.safety,
             "source": "\n".join(post.sources),
-            "contentToken": await self._retrieve_content_token(post=post)
+            "contentToken": content_token
         }
 
         logger.debug(f"Creating post with data={data}")
@@ -1247,13 +1257,19 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
     async def _retrieve_content_token(self, post:resources.InternalPost) -> str:
         content_token = post._extra[self._NAME].get("content_token")
         if content_token:
+            logger.debug(f"Content token '{content_token}' found in post '{post.id}'")
             return content_token
         
-        if post.local_file and post.local_file.exists():
+        if post.local_file:
+            logger.debug(f"Local file '{post.local_file}' found in post '{post.id}'")
+            if not post.local_file.exists():
+                logger.error(f"Local file '{post.local_file}' was found in post {post.id}, but the file doesn't exist in the filesystem")
+                raise errors.MissingFile
             content_token = await self._upload_temporary_file(file=post.local_file)
             post._extra[self._NAME]["content_token"] = content_token
             return content_token
         
+        logger.error(f"No local file or content token found in post '{post.id}'")
         raise errors.MissingFile
 
     @SzurubooruErrorHandler()
