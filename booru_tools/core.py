@@ -11,7 +11,7 @@ import signal
 
 from booru_tools.loaders import plugin_loader
 from booru_tools.plugins import _plugin_template
-from booru_tools.shared import errors, resources
+from booru_tools.shared import errors, resources, constants
 
 class GracefulExit(SystemExit):
     code = 1
@@ -44,7 +44,7 @@ class SessionManager:
 class BooruTools:
     def __init__(self, booru_plugin_directory:Path="", config:dict=defaultdict(dict), tmp_path:str="tmp"):
         if not booru_plugin_directory:
-            program_path = Path(__file__).parent
+            program_path = constants.ROOT_FOLDER
             self.booru_plugin_directory = program_path / Path("plugins")
         else:
             self.booru_plugin_directory = Path(booru_plugin_directory)
