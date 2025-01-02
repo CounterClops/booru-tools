@@ -230,30 +230,6 @@ class SzurubooruErrorHandler:
                 raise error
         return wrapper
 
-class RetryOnException:
-    def __init__(self, exception:Exception=IntegrityError, wait_time:int=30, retry_limit:int=6):
-        self.wait_time = wait_time
-        self.retry_limit = retry_limit
-        self.exception = exception
-
-    def __call__(self, func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
-        @functools.wraps(func)
-        async def wrapper(*args: Any, **kwargs: Any) -> R:
-            try:
-                return await func(*args, **kwargs)
-            except self.exception as e:
-                logger.debug(f"{e}")
-                attempt_count = 1
-                while attempt_count < self.retry_limit:
-                    try:
-                        logger.debug(f"Retrying in {self.wait_time}s")
-                        await asyncio.sleep(self.wait_time)
-                        return await func(*args, **kwargs)
-                    except self.exception as e:
-                        logger.debug(f"Encountered '{e}', on attempt {attempt_count}")
-                        attempt_count += 1
-        return wrapper
-
 class ValidateUniquePostTags:
     def __init__(self, post_param:str="post"):
         self.post_param = post_param
@@ -734,7 +710,11 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         raise NotImplementedError
 
     @errors.log_all_errors
-    @RetryOnException(exception=IntegrityError, wait_time=30, retry_limit=6)
+    @errors.RetryOnExceptions(
+        exceptions=[IntegrityError],
+        wait_time=30,
+        retry_limit=6
+    )
     async def push_tag(self, tag:resources.InternalTag, replace_tags:bool=False, create_empty_tags:bool=True) -> resources.InternalTag:       
         # Work around as szurubooru returns a 500 error if tag names exceed 190 names
         tag.names = tag.names[:189]
@@ -868,6 +848,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             "created_at",
             "updated_at",
             "sha1",
+            "md5",
             "post_url",
             "description",
             "pools"
@@ -899,6 +880,11 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         
         return escaped_string
 
+    @errors.RetryOnExceptions(
+        exceptions=[errors.GatewayTimeout],
+        wait_time=30,
+        retry_limit=6
+    )
     @SzurubooruErrorHandler()
     async def _post_search(self, search_query:str, search_size:int=100, offset:int=0) -> PagedSearch[Post]:
         url = f"{self.URL_BASE}/api/posts/"
@@ -927,6 +913,11 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         return post_search
 
+    @errors.RetryOnExceptions(
+        exceptions=[errors.GatewayTimeout],
+        wait_time=30,
+        retry_limit=6
+    )
     @SzurubooruErrorHandler()
     async def _tag_search(self, search_query:str, search_size:int=100, offset:int=0) -> PagedSearch[Tag]:
         url = f"{self.URL_BASE}/api/tags/"
@@ -954,6 +945,11 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         return tag_search
 
+    @errors.RetryOnExceptions(
+        exceptions=[errors.GatewayTimeout],
+        wait_time=30,
+        retry_limit=6
+    )
     @SzurubooruErrorHandler()
     async def _pool_search(self, search_query:str, search_size:int=100, offset:int=0) -> PagedSearch[Pool]:
         url = f"{self.URL_BASE}/api/pools/"
@@ -976,6 +972,11 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         
         return pool_search
 
+    @errors.RetryOnExceptions(
+        exceptions=[errors.GatewayTimeout],
+        wait_time=30,
+        retry_limit=6
+    )
     @alru_cache(maxsize=1024, ttl=15)
     @SzurubooruErrorHandler()
     async def _get_tag(self, tag:str) -> Tag|None:
@@ -1001,6 +1002,11 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         
         return None
 
+    @errors.RetryOnExceptions(
+        exceptions=[errors.GatewayTimeout],
+        wait_time=30,
+        retry_limit=6
+    )
     @SzurubooruErrorHandler()
     async def _create_tag(self, tag:resources.InternalTag) -> Tag:
         url = f"{self.URL_BASE}/api/tags"
@@ -1036,6 +1042,11 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         return tag
 
+    @errors.RetryOnExceptions(
+        exceptions=[errors.GatewayTimeout],
+        wait_time=30,
+        retry_limit=6
+    )
     @SzurubooruErrorHandler()
     async def _update_tag(self, tag:resources.InternalTag) -> Tag:
         safe_tag = urllib.parse.quote(tag.names[0])
@@ -1073,6 +1084,11 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         return tag
 
+    @errors.RetryOnExceptions(
+        exceptions=[errors.GatewayTimeout],
+        wait_time=30,
+        retry_limit=6
+    )
     @SzurubooruErrorHandler()
     async def _delete_tag(self, tag:Tag) -> None:
         safe_tag = urllib.parse.quote(tag.names[0])
@@ -1098,6 +1114,11 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         
         return None
 
+    @errors.RetryOnExceptions(
+        exceptions=[errors.GatewayTimeout],
+        wait_time=30,
+        retry_limit=6
+    )
     @SzurubooruErrorHandler()
     async def _merge_tag(self, from_tag:Tag, to_tag:Tag) -> Tag:
         url = f"{self.URL_BASE}/api/tag-merge/"
@@ -1130,6 +1151,11 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         return tag
     
+    @errors.RetryOnExceptions(
+        exceptions=[errors.GatewayTimeout],
+        wait_time=30,
+        retry_limit=6
+    )
     @SzurubooruErrorHandler()
     async def _get_conflicting_tags(self, names:list[str]) -> list[Tag]:
         conflicting_tags:list[Tag] = []
@@ -1165,6 +1191,11 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         return tag
 
+    @errors.RetryOnExceptions(
+        exceptions=[errors.GatewayTimeout],
+        wait_time=30,
+        retry_limit=6
+    )
     @ValidateUniquePostTags(post_param="post")
     @SzurubooruErrorHandler()
     async def _create_post(self, post:resources.InternalPost) -> Post:
@@ -1201,23 +1232,32 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         return post
 
+    @errors.RetryOnExceptions(
+        exceptions=[errors.GatewayTimeout],
+        wait_time=30,
+        retry_limit=6
+    )
     @ValidateUniquePostTags(post_param="new_post")
     @SzurubooruErrorHandler()
     async def _update_post(self, original_post:resources.InternalPost, new_post:resources.InternalPost) -> Post:
         url = f"{self.URL_BASE}/api/post/{original_post.id}"
 
+        post_version = original_post._extra[self._NAME]["version"]
+
         data = {
-            "version": original_post._extra[self._NAME]["version"],
+            "version": post_version,
             "tags": new_post.str_tags,
             "safety": new_post.safety,
             "source": "\n".join(new_post.sources)
         }
 
-        try:
-            content_token = await self._retrieve_content_token(post=new_post)
-            data["contentToken"] = content_token
-        except errors.MissingFile:
-            pass
+        # try:
+        #     logger.debug(f"Checking for content_token in new post '{new_post.id}' for existing post '{original_post.id}' v{post_version}")
+        #     content_token = await self._retrieve_content_token(post=new_post)
+        #     data["contentToken"] = content_token
+        # except errors.MissingFile as e:
+        #     logger.debug(f"No new file to update existing post with")
+        #     pass
 
         logger.debug(f"Updating post '{original_post.id}' with data={data}")
 
@@ -1272,6 +1312,11 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         logger.error(f"No local file or content token found in post '{post.id}'")
         raise errors.MissingFile
 
+    @errors.RetryOnExceptions(
+        exceptions=[errors.GatewayTimeout],
+        wait_time=30,
+        retry_limit=6
+    )
     @SzurubooruErrorHandler()
     async def _upload_temporary_file(self, file:Path) -> str:
         """Upload the provided file to the Szurubooru temporary upload endpoint
@@ -1307,6 +1352,11 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         logger.debug(f"Uploaded '{file}' to temporary endpoint with token={token}")
         return token
 
+    @errors.RetryOnExceptions(
+        exceptions=[errors.GatewayTimeout],
+        wait_time=30,
+        retry_limit=6
+    )
     @SzurubooruErrorHandler()
     async def _reverse_image_search(self, content_token:str) -> ImageSearch[Post]:
         url = f"{self.URL_BASE}/api/posts/reverse-search"
