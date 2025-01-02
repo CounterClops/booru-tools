@@ -612,7 +612,7 @@ class SzurubooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
 class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
     def __init__(self, session: aiohttp.ClientSession = None) -> None:
         self.session = session
-        self.image_distance_threshold = 0.15
+        self.image_distance_threshold = 0.10
         logger.debug(f'url_base = {self.URL_BASE}')
         self.rate_limiter = AsyncLimiter(
             max_rate=200,
@@ -1214,6 +1214,11 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             "contentToken": content_token
         }
 
+        thumbnail_content_token = await self._upload_thumbnail(file=post.local_file)
+
+        if thumbnail_content_token:
+            data["thumbnailToken"]  = thumbnail_content_token
+
         logger.debug(f"Creating post with data={data}")
 
         async with self.session.post(
@@ -1311,6 +1316,25 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         
         logger.error(f"No local file or content token found in post '{post.id}'")
         raise errors.MissingFile
+    
+    async def _upload_thumbnail(self, file:Path) -> str:
+        if not file:
+            return None
+        
+        file_extension = file.suffix
+        logger.debug(f"Getting thumbnail for file extension '{file_extension}'")
+
+        thumbnail_file = constants.Thumbnails.get_default_thumbnail(
+            file_extension=file_extension
+        )
+
+        if not thumbnail_file:
+            logger.debug(f"No default thumbnail found for file extension '{file_extension}'")
+            return None
+        
+        logger.info(f"Found default thumbnail for file extension '{file_extension}'")        
+        thumbnail_content_token = await self._upload_temporary_file(file=thumbnail_file)
+        return thumbnail_content_token
 
     @errors.RetryOnExceptions(
         exceptions=[errors.GatewayTimeout],

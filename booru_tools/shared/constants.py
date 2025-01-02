@@ -1,3 +1,7 @@
+from pathlib import Path
+
+ROOT_FOLDER = Path(__file__).parent.parent
+
 class Category:
     GENERAL = "General"
     ARTIST = "Artist"
@@ -70,3 +74,14 @@ class SourceTypes:
     POOL = "Pool"
     UNKNOWN = "Unknown"
     _DEFAULT = UNKNOWN
+
+class Thumbnails:
+    SWF = ROOT_FOLDER / Path("images/thumbnails/swf.png")
+
+    @classmethod
+    def get_default_thumbnail(cls, file_extension:str) -> Path|None:
+        for name, value in vars(cls).items():
+            file_extension = file_extension.replace(".", "")
+            if file_extension.lower() in name.lower():
+                return value
+        return None
