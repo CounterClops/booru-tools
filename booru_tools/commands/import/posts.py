@@ -132,14 +132,18 @@ class ImportPostsCommand():
         posts_to_download:list[resources.InternalPost] = []
         all_posts:list[resources.InternalPost] = []
         
+        metadata_posts = []
         for metadata in metadata_list:
             post:resources.InternalPost = self.booru_tools.create_post_from_metadata(metadata=metadata, download_link="")
-            
             if not self.check_post_allowed(post=post):
                 logger.info(f"Skipping '{post.id}' as it is not allowed with current config")
                 continue
+            metadata_posts.append(post)
 
-            existing_post = await self.booru_tools.destination_plugin.find_exact_post(post=post)
+        existing_post_tasks = await self._check_for_existing_posts(posts=metadata_posts)
+        for post in metadata_posts:
+            existing_post:resources.InternalPost = existing_post_tasks[post.id].result()
+
             if not existing_post:
                 logger.info(f"Queuing up '{post.post_url}' for download")
                 posts_to_download.append(post)
@@ -162,6 +166,16 @@ class ImportPostsCommand():
             self.blank_download_page_count += 1
         
         return all_posts
+
+    async def _check_for_existing_posts(self, posts:list[resources.InternalPost]) -> dict[int, asyncio.Task]:
+        existing_posts:dict[int, asyncio.Task] = {}
+        async with asyncio.TaskGroup() as task_group:
+            for post in posts:
+                task = task = task_group.create_task(
+                    self.booru_tools.destination_plugin.find_exact_post(post=post)
+                )
+                existing_posts[post.id] = task
+        return existing_posts
 
     def _download_posts(self, posts_to_download:list[resources.InternalPost], folder:Path) -> list[resources.InternalPost]:
         logger.info(f"Downloading {len(posts_to_download)} posts")
