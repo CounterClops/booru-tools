@@ -100,7 +100,8 @@ class ImportPostsCommand():
         )
         
         for download_folder in metadata_downloader:
-            posts = await self._ingest_folder(folder=download_folder)
+            source_posts = await self._ingest_folder(folder=download_folder)
+            posts = await self._download_imported_posts(posts=source_posts, folder=download_folder)
             try:
                 await self.booru_tools.update_posts(posts=posts)
             except TypeError as e:
@@ -129,9 +130,6 @@ class ImportPostsCommand():
         metadata_list = self.booru_tools.import_metadata_files(download_directory=folder)
         logger.debug(f"Reviewing the metadata of {len(metadata_list)} files")
 
-        posts_to_download:list[resources.InternalPost] = []
-        all_posts:list[resources.InternalPost] = []
-        
         metadata_posts = []
         for metadata in metadata_list:
             post:resources.InternalPost = self.booru_tools.create_post_from_metadata(metadata=metadata, download_link="")
@@ -139,9 +137,15 @@ class ImportPostsCommand():
                 logger.info(f"Skipping '{post.id}' as it is not allowed with current config")
                 continue
             metadata_posts.append(post)
+        
+        return metadata_posts
+    
+    async def _download_imported_posts(self, posts:list[resources.InternalPost], folder:Path) -> list[resources.InternalPost]:
+        posts_to_download:list[resources.InternalPost] = []
+        all_posts:list[resources.InternalPost] = []
 
-        existing_post_tasks = await self._check_for_existing_posts(posts=metadata_posts)
-        for post in metadata_posts:
+        existing_post_tasks = await self._check_for_existing_posts(posts=posts)
+        for post in posts:
             existing_post:resources.InternalPost = existing_post_tasks[post.id].result()
 
             if not existing_post:
@@ -158,7 +162,7 @@ class ImportPostsCommand():
                 self.all_tags.append(tag)
 
         if posts_to_download:
-            downloaded_posts = self._download_posts(posts_to_download=posts_to_download, folder=folder)
+            downloaded_posts = self._download_post_files(posts_to_download=posts_to_download, folder=folder)
             all_posts.extend(downloaded_posts)
             self.blank_download_page_count = 0
         else:
@@ -177,7 +181,7 @@ class ImportPostsCommand():
                 existing_posts[post.id] = task
         return existing_posts
 
-    def _download_posts(self, posts_to_download:list[resources.InternalPost], folder:Path) -> list[resources.InternalPost]:
+    def _download_post_files(self, posts_to_download:list[resources.InternalPost], folder:Path) -> list[resources.InternalPost]:
         logger.info(f"Downloading {len(posts_to_download)} posts")
         post_urls = [post.post_url for post in posts_to_download]
         self.gallery_dl.download_urls(urls=post_urls, download_folder=folder)
