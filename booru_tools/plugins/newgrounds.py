@@ -49,7 +49,17 @@ class NewgroundsMeta(SharedAttributes, _plugin_template.MetadataPlugin):
         return id
     
     def get_sources(self, metadata:dict) -> list[str]:
-        return []
+        sources:list[str] = []
+        
+        file_url = metadata.get("url")
+        if file_url:
+            sources.append(file_url)
+
+        post_url = self.get_post_url(metadata=metadata)
+        if post_url:
+            sources.append(post_url)
+        
+        return sources
 
     def get_description(self, metadata:dict) -> str:
         description:str = metadata.get("description", "")
