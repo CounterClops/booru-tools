@@ -4,7 +4,7 @@ from loguru import logger
 from collections import defaultdict
 import json
 import shutil
-
+import hashlib
 import asyncio
 import aiohttp
 import signal
@@ -19,7 +19,7 @@ class GracefulExit(SystemExit):
 class SessionManager:
     def __init__(self):
         self.session = None
-        self.limit_per_host = 50
+        self.limit_per_host = 25
         self.default_headers = {
             "User-Agent": "BooruTools/1.0"
         }
@@ -37,9 +37,8 @@ class SessionManager:
         return self.session
 
     async def close(self):
-        if self.session:
-            logger.debug("Closing aiohttp session")
-            await self.session.close()
+        logger.debug("Closing aiohttp session")
+        await self.session.close()
 
 class BooruTools:
     def __init__(self, booru_plugin_directory:Path="", config:dict=defaultdict(dict), tmp_path:str="tmp"):
@@ -65,8 +64,11 @@ class BooruTools:
     def raise_graceful_exit(self, *args):
         try:
             loop = asyncio.get_event_loop()
+            logger.debug("Cancelling all async tasks")
             for task in asyncio.all_tasks():
                 task.cancel()
+            close_session_task = loop.create_task(self.session_manager.close())
+            loop.run_until_complete(close_session_task)
             loop.stop()
         except RuntimeError:
             logger.debug("No async loop")
@@ -109,6 +111,7 @@ class BooruTools:
                     logger.debug(f"No file to upload for '{post.id}'")
                 else:
                     logger.debug(f"File {post.local_file.name} found for '{post.id}'")
+                    post = self.add_missing_post_hashes(post=post)
 
                 if post.post_url:
                     if post.post_url not in post.sources:
@@ -233,6 +236,41 @@ class BooruTools:
             logger.debug(f"Found '{media_file}' media file")
             return media_file
         return None
+    
+    def add_missing_post_hashes(self, post:resources.InternalPost) -> resources.InternalPost:
+        if not post.md5:
+            post.md5 = self.get_md5_hash(file_path=post.local_file)
+        if not post.sha1:
+            post.sha1 = self.get_sha1_hash(file_path=post.local_file)
+        return post
+
+    def get_md5_hash(self, file_path:Path) -> str:
+        if not file_path.exists():
+            return ""
+        
+        logger.debug(f"Calculating md5 hash for '{file_path}'")
+        with open(file_path, "rb") as file:
+            file_hash = hashlib.md5()
+            while chunk := file.read(8192):
+                file_hash.update(chunk)
+
+        md5_hash = file_hash.hexdigest()
+        logger.debug(f"MD5 hash for '{file_path}' is '{md5_hash}'")
+        return md5_hash
+
+    def get_sha1_hash(self, file_path:Path) -> str:
+        if not file_path.exists():
+            return ""
+        
+        logger.debug(f"Calculating sha1 hash for '{file_path}'")
+        with open(file_path, "rb") as file:
+            file_hash = hashlib.sha1()
+            while chunk := file.read(8192):
+                file_hash.update(chunk)
+
+        sha1_hash = file_hash.hexdigest()
+        logger.debug(f"SHA1 hash for '{file_path}' is '{sha1_hash}'")
+        return sha1_hash
 
     @staticmethod
     def split_tag_list(tag_string:str, and_seperator:str="|", or_seperator:str=","):
