@@ -1,5 +1,6 @@
 from loguru import logger
 from datetime import datetime
+from typing import Any
 import re
 
 from booru_tools.plugins import _plugin_template
@@ -69,8 +70,27 @@ class NewgroundsMeta(SharedAttributes, _plugin_template.MetadataPlugin):
         score:int = metadata.get("favorites", 0)
         return score
 
-    def get_tags(self, metadata:dict[str, any]) -> list[resources.InternalTag]:
-        return []
+    def get_tags(self, metadata:dict[str, Any]) -> list[resources.InternalTag]:
+        str_tags:list[str] = metadata.get("tags", [])
+        artists:list[str] = metadata.get("artist", [])
+        all_tags:list[resources.InternalTag] = []
+
+        for tag in artists:
+            tag = resources.InternalTag(
+                names=[tag],
+                category=constants.Category.ARTIST
+            )
+            all_tags.append(tag)
+        
+        for tag in str_tags:
+            if tag in artists:
+                continue
+            tag = resources.InternalTag(
+                names=[tag]
+            )
+            all_tags.append(tag)
+        
+        return all_tags
 
     def get_created_at(self, metadata:dict) -> datetime:
         datetime_str:str = metadata["date"]
