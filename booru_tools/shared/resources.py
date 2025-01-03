@@ -268,8 +268,12 @@ class InternalPost(InternalResource):
         return False
     
     def contains_all_tags(self, tags:list[str|InternalTag]) -> bool:
+        if not tags:
+            return True
+        
         post_tags = set(self.str_tags)
         all_tags = set()
+
         for tag in tags:
             if isinstance(tag, InternalTag):
                 tag_strings = set(tag.all_tag_strings())
