@@ -3,6 +3,7 @@ from booru_tools.shared import errors, constants, resources
 from datetime import datetime
 from loguru import logger
 import re
+import html
 
 class SharedAttributes:
     _DOMAINS = [
@@ -56,8 +57,9 @@ class GelbooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
         tags:str = metadata.get("tags", "")
 
         for tag in tags.split(" "):
+            unescaped_tag = html.unescape(tag)
             tag_resource = resources.InternalTag(
-                names=[tag]
+                names=[unescaped_tag]
             )
             all_tags.append(tag_resource)
 
