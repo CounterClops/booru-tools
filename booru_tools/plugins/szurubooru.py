@@ -635,9 +635,9 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         )
 
         self.sql_fixes_file = Path("szurubooru_fixes.sql")
-        if self.create_sql_fixes and self.sql_fixes_file.exists():
-            logger.info(f"Blanking '{self.sql_fixes_file.absolute()}' as it exists")
-            open(self.sql_fixes_file, 'w').close()
+        # if self.create_sql_fixes and self.sql_fixes_file.exists():
+        #     logger.info(f"Blanking '{self.sql_fixes_file.absolute()}' as it exists")
+        #     open(self.sql_fixes_file, 'w').close()
     
     @property
     def token(self):
@@ -845,6 +845,11 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
     @errors.log_all_errors
     async def push_post(self, post:resources.InternalPost, force_update:bool=False) -> resources.InternalPost:
+        merge_ignored_fields = [
+            "id",
+            "category"
+        ]
+
         if post.local_file:
             try:
                 content_token = await self._retrieve_content_token(post=post)
@@ -859,14 +864,16 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 logger.debug("No similar posts found, creating new post")
                 new_post = await self._create_post(post=post)
                 new_post_resource = new_post.to_resource()
-                self._generate_sql_fixes(post=new_post_resource)
+                if self.create_sql_fixes:
+                    created_post_with_original_date:resources.InternalPost = new_post_resource.merge_resource(update_object=post, fields_to_ignore=merge_ignored_fields)
+                    self._generate_sql_fixes(post=created_post_with_original_date)
                 return new_post_resource
 
             closest_post = self._check_similar_posts_for_exact(posts=similar_posts)
             closest_post_resource = closest_post.to_resource()
-            desired_post:resources.InternalTag = closest_post_resource.merge_resource(update_object=post)
+            desired_post:resources.InternalPost = closest_post_resource.merge_resource(update_object=post, fields_to_ignore=merge_ignored_fields)
             new_post = await self._update_post(post=desired_post)
-            self._generate_sql_fixes(post=new_post_resource)
+            self._generate_sql_fixes(post=desired_post)
             return new_post.to_resource()
         
         logger.debug("No local file found, looking for existing post")
@@ -878,12 +885,9 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         logger.debug(f"Updating post with id={exact_post.id}")
         
-        merge_ignored_fields = [
-            "id",
-            "category"
-        ]
-        desired_post:resources.InternalTag = exact_post.merge_resource(update_object=post, fields_to_ignore=merge_ignored_fields)
-
+        desired_post:resources.InternalPost = exact_post.merge_resource(update_object=post, fields_to_ignore=merge_ignored_fields)
+        self._generate_sql_fixes(post=desired_post)
+        
         diff_ignored_fields = [
             "id",
             "category",
@@ -906,7 +910,6 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             post=desired_post
         )
         updated_post_resource = updated_post.to_resource()
-        self._generate_sql_fixes(post=updated_post_resource)
 
         return updated_post_resource
 
