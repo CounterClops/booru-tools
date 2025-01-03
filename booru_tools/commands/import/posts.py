@@ -83,10 +83,16 @@ class ImportPostsCommand():
             except Exception as e:
                 logger.critical(f"url import failed with {e}")
 
-        # await self.booru_tools.update_tags(tags=self.all_tags)
+        filtered_tags = self._filter_tags(tags=self.all_tags)
+        await self.booru_tools.update_tags(tags=filtered_tags)
         
         self.booru_tools.cleanup_process_directories()
         await self.booru_tools.session_manager.close()
+    
+    def _filter_tags(self, tags:list[resources.InternalTag]) -> list[resources.InternalTag]:
+        filtered_tags = [tag for tag in tags if tag.category != constants.Category._DEFAULT]
+        logger.debug(f"Filtered out tags in default category, going from {len(tags)} tags to {len(filtered_tags)} tags")
+        return filtered_tags
 
     async def _import_posts_from_url(self, url:str):
         self.gallery_dl = GalleryDl(
