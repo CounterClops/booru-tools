@@ -230,6 +230,21 @@ class SzurubooruErrorHandler:
                 raise error
         return wrapper
 
+class ProcessingErrorWarnAndSkip:
+    def __init__(self):
+        pass
+
+    def __call__(self, func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+        @functools.wraps(func)
+        async def wrapper(*args: Any, **kwargs: Any) -> R:
+            try:
+                return await func(*args, **kwargs)
+            except ProcessingError as e:
+                logger.warning(f"""{e}: Skipping and continuing.\nThis is likely caused by the szurubooru server not being able to generate a thumbnail (This can happen for flash/swf files).\nConsider setting 'allow_broken_uploads: true' in the server config""")
+                pass
+
+        return wrapper
+
 class ValidateUniquePostTags:
     def __init__(self, post_param:str="post"):
         self.post_param = post_param
@@ -642,6 +657,19 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 return found_post.to_resource()
             except IndexError:
                 logger.debug("Post not found with md5")
+        
+        if post.sha1:
+            search_query = f"sha1:{post.sha1}"
+            post_search = await self._post_search(
+                search_query=search_query,
+                search_size=1
+            )
+            try:
+                found_post:Post = post_search.results[0]
+                logger.debug(f"Post found with sha1: {found_post.checksum}")
+                return found_post.to_resource()
+            except IndexError:
+                logger.debug("Post not found with sha1")
 
         # for source in post.sources_of_type(desired_source_type=constants.SourceTypes.POST):
         #     search_query = f"source:{source}"
@@ -1196,6 +1224,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         wait_time=30,
         retry_limit=6
     )
+    @ProcessingErrorWarnAndSkip()
     @ValidateUniquePostTags(post_param="post")
     @SzurubooruErrorHandler()
     async def _create_post(self, post:resources.InternalPost) -> Post:
@@ -1242,6 +1271,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         wait_time=30,
         retry_limit=6
     )
+    @ProcessingErrorWarnAndSkip()
     @ValidateUniquePostTags(post_param="new_post")
     @SzurubooruErrorHandler()
     async def _update_post(self, original_post:resources.InternalPost, new_post:resources.InternalPost) -> Post:
