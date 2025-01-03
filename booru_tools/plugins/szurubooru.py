@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field, fields
 from typing import Optional, Literal, Type, Generic, TypeVar, ParamSpec, Callable, Awaitable, Any
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from loguru import logger
 from async_lru import alru_cache
 from aiolimiter import AsyncLimiter
@@ -628,11 +628,16 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
     def __init__(self, session: aiohttp.ClientSession = None) -> None:
         self.session = session
         self.image_distance_threshold = 0.10
-        logger.debug(f'url_base = {self.URL_BASE}')
+        self.create_sql_fixes = True
         self.rate_limiter = AsyncLimiter(
             max_rate=200,
             time_period=60
         )
+
+        self.sql_fixes_file = Path("szurubooru_fixes.sql")
+        if self.create_sql_fixes and self.sql_fixes_file.exists():
+            logger.info(f"Blanking '{self.sql_fixes_file.absolute()}' as it exists")
+            open(self.sql_fixes_file, 'w').close()
     
     @property
     def token(self):
@@ -737,12 +742,12 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
     async def get_all_pools(self) -> list[resources.InternalPool]:
         raise NotImplementedError
 
-    @errors.log_all_errors
     @errors.RetryOnExceptions(
         exceptions=[IntegrityError],
         wait_time=30,
         retry_limit=6
     )
+    @errors.log_all_errors
     async def push_tag(self, tag:resources.InternalTag, replace_tags:bool=False, create_empty_tags:bool=True) -> resources.InternalTag:       
         # Work around as szurubooru returns a 500 error if tag names exceed 190 names
         tag.names = tag.names[:189]
@@ -853,13 +858,15 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             if not similar_posts:
                 logger.debug("No similar posts found, creating new post")
                 new_post = await self._create_post(post=post)
-                return new_post.to_resource()
+                new_post_resource = new_post.to_resource()
+                self._generate_sql_fixes(post=new_post_resource)
+                return new_post_resource
 
             closest_post = self._check_similar_posts_for_exact(posts=similar_posts)
-            new_post = await self._update_post(
-                original_post=closest_post,
-                new_post=post
-            )
+            closest_post_resource = closest_post.to_resource()
+            desired_post:resources.InternalTag = closest_post_resource.merge_resource(update_object=post)
+            new_post = await self._update_post(post=desired_post)
+            self._generate_sql_fixes(post=new_post_resource)
             return new_post.to_resource()
         
         logger.debug("No local file found, looking for existing post")
@@ -868,9 +875,16 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         except PostNotFoundError as error:
             logger.error(f"Encountered '{error}'. This shouldn't happen. Was trying to get {exact_post}")
             return None
-        
+
         logger.debug(f"Updating post with id={exact_post.id}")
-        ignored_fields = [
+        
+        merge_ignored_fields = [
+            "id",
+            "category"
+        ]
+        desired_post:resources.InternalTag = exact_post.merge_resource(update_object=post, fields_to_ignore=merge_ignored_fields)
+
+        diff_ignored_fields = [
             "id",
             "category",
             "created_at",
@@ -881,17 +895,20 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             "description",
             "pools"
         ]
-        changes = post.diff(resource=exact_post, fields_to_ignore=ignored_fields)
-        if not changes:
+        proposed_changes = desired_post.diff(resource=post, fields_to_ignore=diff_ignored_fields)
+        
+        if not proposed_changes:
             logger.debug(f"No changes found in post ({exact_post.id})")
             return None
         
-        logger.debug(f"Changes found in post ({post.id}): {changes}")
+        logger.debug(f"Changes found in post ({post.id}): {proposed_changes}")
         updated_post = await self._update_post(
-            original_post=exact_post,
-            new_post=post
+            post=desired_post
         )
-        return updated_post.to_resource()
+        updated_post_resource = updated_post.to_resource()
+        self._generate_sql_fixes(post=updated_post_resource)
+
+        return updated_post_resource
 
     async def push_pool(self, pool:resources.InternalPool, force_update:bool=False) -> resources.InternalPool:
         raise NotImplementedError
@@ -908,12 +925,12 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         
         return escaped_string
 
+    @SzurubooruErrorHandler()
     @errors.RetryOnExceptions(
         exceptions=[errors.GatewayTimeout],
         wait_time=30,
         retry_limit=6
     )
-    @SzurubooruErrorHandler()
     async def _post_search(self, search_query:str, search_size:int=100, offset:int=0) -> PagedSearch[Post]:
         url = f"{self.URL_BASE}/api/posts/"
 
@@ -941,12 +958,12 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         return post_search
 
+    @SzurubooruErrorHandler()
     @errors.RetryOnExceptions(
         exceptions=[errors.GatewayTimeout],
         wait_time=30,
         retry_limit=6
     )
-    @SzurubooruErrorHandler()
     async def _tag_search(self, search_query:str, search_size:int=100, offset:int=0) -> PagedSearch[Tag]:
         url = f"{self.URL_BASE}/api/tags/"
         params = {
@@ -973,12 +990,12 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         return tag_search
 
+    @SzurubooruErrorHandler()
     @errors.RetryOnExceptions(
         exceptions=[errors.GatewayTimeout],
         wait_time=30,
         retry_limit=6
     )
-    @SzurubooruErrorHandler()
     async def _pool_search(self, search_query:str, search_size:int=100, offset:int=0) -> PagedSearch[Pool]:
         url = f"{self.URL_BASE}/api/pools/"
         params = {
@@ -1000,13 +1017,13 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         
         return pool_search
 
+    @SzurubooruErrorHandler()
     @errors.RetryOnExceptions(
         exceptions=[errors.GatewayTimeout],
         wait_time=30,
         retry_limit=6
     )
     @alru_cache(maxsize=1024, ttl=15)
-    @SzurubooruErrorHandler()
     async def _get_tag(self, tag:str) -> Tag|None:
         safe_tag = urllib.parse.quote(tag)
         url = f"{self.URL_BASE}/api/tag/{safe_tag}"
@@ -1030,12 +1047,12 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         
         return None
 
+    @SzurubooruErrorHandler()
     @errors.RetryOnExceptions(
         exceptions=[errors.GatewayTimeout],
         wait_time=30,
         retry_limit=6
     )
-    @SzurubooruErrorHandler()
     async def _create_tag(self, tag:resources.InternalTag) -> Tag:
         url = f"{self.URL_BASE}/api/tags"
 
@@ -1070,12 +1087,12 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         return tag
 
+    @SzurubooruErrorHandler()
     @errors.RetryOnExceptions(
         exceptions=[errors.GatewayTimeout],
         wait_time=30,
         retry_limit=6
     )
-    @SzurubooruErrorHandler()
     async def _update_tag(self, tag:resources.InternalTag) -> Tag:
         safe_tag = urllib.parse.quote(tag.names[0])
         url = f"{self.URL_BASE}/api/tag/{safe_tag}"
@@ -1112,12 +1129,12 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         return tag
 
+    @SzurubooruErrorHandler()
     @errors.RetryOnExceptions(
         exceptions=[errors.GatewayTimeout],
         wait_time=30,
         retry_limit=6
     )
-    @SzurubooruErrorHandler()
     async def _delete_tag(self, tag:Tag) -> None:
         safe_tag = urllib.parse.quote(tag.names[0])
         url = f"{self.URL_BASE}/api/tag/{safe_tag}"
@@ -1142,12 +1159,12 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         
         return None
 
+    @SzurubooruErrorHandler()
     @errors.RetryOnExceptions(
         exceptions=[errors.GatewayTimeout],
         wait_time=30,
         retry_limit=6
     )
-    @SzurubooruErrorHandler()
     async def _merge_tag(self, from_tag:Tag, to_tag:Tag) -> Tag:
         url = f"{self.URL_BASE}/api/tag-merge/"
 
@@ -1179,12 +1196,12 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         return tag
     
+    @SzurubooruErrorHandler()
     @errors.RetryOnExceptions(
         exceptions=[errors.GatewayTimeout],
         wait_time=30,
         retry_limit=6
     )
-    @SzurubooruErrorHandler()
     async def _get_conflicting_tags(self, names:list[str]) -> list[Tag]:
         conflicting_tags:list[Tag] = []
         all_found_names:set[str] = set()
@@ -1219,14 +1236,14 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         return tag
 
+    @SzurubooruErrorHandler()
+    @ValidateUniquePostTags(post_param="post")
+    @ProcessingErrorWarnAndSkip()
     @errors.RetryOnExceptions(
         exceptions=[errors.GatewayTimeout],
         wait_time=30,
         retry_limit=6
     )
-    @ProcessingErrorWarnAndSkip()
-    @ValidateUniquePostTags(post_param="post")
-    @SzurubooruErrorHandler()
     async def _create_post(self, post:resources.InternalPost) -> Post:
         url = f"{self.URL_BASE}/api/posts/"
 
@@ -1266,24 +1283,24 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         return post
 
+    @SzurubooruErrorHandler()
+    @ValidateUniquePostTags(post_param="new_post")
+    @ProcessingErrorWarnAndSkip()
     @errors.RetryOnExceptions(
         exceptions=[errors.GatewayTimeout],
         wait_time=30,
         retry_limit=6
     )
-    @ProcessingErrorWarnAndSkip()
-    @ValidateUniquePostTags(post_param="new_post")
-    @SzurubooruErrorHandler()
-    async def _update_post(self, original_post:resources.InternalPost, new_post:resources.InternalPost) -> Post:
-        url = f"{self.URL_BASE}/api/post/{original_post.id}"
+    async def _update_post(self, post:resources.InternalPost) -> Post:
+        url = f"{self.URL_BASE}/api/post/{post.id}"
 
-        post_version = original_post._extra[self._NAME]["version"]
+        post_version = post._extra[self._NAME]["version"]
 
         data = {
             "version": post_version,
-            "tags": new_post.str_tags,
-            "safety": new_post.safety,
-            "source": "\n".join(new_post.sources)
+            "tags": post.str_tags,
+            "safety": post.safety,
+            "source": "\n".join(post.sources)
         }
 
         # try:
@@ -1294,7 +1311,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         #     logger.debug(f"No new file to update existing post with")
         #     pass
 
-        logger.debug(f"Updating post '{original_post.id}' with data={data}")
+        logger.debug(f"Updating post '{post.id}' with data={data}")
 
         async with self.session.put(
                 url=url,
@@ -1406,12 +1423,12 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         logger.debug(f"Uploaded '{file}' to temporary endpoint with token={token}")
         return token
 
+    @SzurubooruErrorHandler()
     @errors.RetryOnExceptions(
         exceptions=[errors.GatewayTimeout],
         wait_time=30,
         retry_limit=6
     )
-    @SzurubooruErrorHandler()
     async def _reverse_image_search(self, content_token:str) -> ImageSearch[Post]:
         url = f"{self.URL_BASE}/api/posts/reverse-search"
 
@@ -1436,3 +1453,17 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         image_search:ImageSearch[Post] = ImageSearch.from_dict(data=response_json)
 
         return image_search
+    
+    def _generate_sql_fixes(self, post:resources.InternalPost) -> None:
+        if not self.create_sql_fixes:
+            return None
+        if not post.created_at:
+            return None
+        
+        postgres_timestamp = post.created_at.astimezone(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        logger.debug(f"Converted datetime from {post.created_at} to postgres timestamp {postgres_timestamp}")
+        sql_update_statement = f"UPDATE post SET creation_time = (TIMESTAMP '{postgres_timestamp}') WHERE id = '{post.id}';"
+        with open(self.sql_fixes_file, 'a') as file:
+            logger.debug(f"Appending sql query [{sql_update_statement}] to {self.sql_fixes_file}")
+            file.write(sql_update_statement + '\n')
+        return None

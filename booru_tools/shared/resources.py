@@ -73,7 +73,7 @@ class InternalResource:
         filtered_data = {key: value for key, value in data.items() if key in valid_keys}
         return filtered_data
         
-    def merge_resource(self, update_object:"InternalResource", allow_blank_values:bool=False, merge_where_possible:bool=True, deep_copy:bool=True) -> "InternalResource":
+    def merge_resource(self, update_object:"InternalResource", allow_blank_values:bool=False, merge_where_possible:bool=True, deep_copy:bool=True, fields_to_ignore:list[str]=[]) -> "InternalResource":
         if deep_copy:
             resource = deepcopy(self)
         else:
@@ -88,6 +88,8 @@ class InternalResource:
             if field.default is not MISSING and new_value == field.default:
                 continue
             if field.default_factory is not MISSING and new_value == field.default_factory():
+                continue
+            if field.name in fields_to_ignore:
                 continue
             if field.name in base_fields and not field.name.startswith("_"):
                 continue
@@ -198,8 +200,8 @@ class InternalPost(InternalResource):
     score: int = 0
     tags: Optional[list[InternalTag]] = field(default_factory=list)
     sources: InitVar[list[str]] = field(default_factory=UniqueList)
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: datetime = None
+    updated_at: datetime = None
     relations: Optional[InternalRelationship] = field(default_factory=InternalRelationship)
     safety: Optional[str] = constants.Safety._DEFAULT
     sha1: Optional[str] = ""
