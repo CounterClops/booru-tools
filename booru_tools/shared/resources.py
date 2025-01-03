@@ -224,7 +224,7 @@ class InternalPost(InternalResource):
     
     @property
     def _default_diff_ignored_fields(self):
-        return ["plugins", "metadata", "_extra", "relations", "score"]
+        return ["plugins", "metadata", "_extra", "relations", "score", "md5", "sha1", "local_file", "origin"]
 
     @property
     def sources(self) -> list[str]:
