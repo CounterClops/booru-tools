@@ -628,7 +628,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
     def __init__(self, session: aiohttp.ClientSession = None) -> None:
         self.session = session
         self.image_distance_threshold = 0.10
-        self.create_sql_fixes = True
+        self.create_sql_fixes = False
         self.rate_limiter = AsyncLimiter(
             max_rate=200,
             time_period=60
