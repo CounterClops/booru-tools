@@ -18,15 +18,23 @@ class SharedAttributes:
 
     @property
     def DEFAULT_POST_SEARCH_URL(self):
-        return f"{self.URL_BASE}/index.php?page=post&s=list&tags="
+        return f"{self.URL_BASE}/index.php?page=post&s=list&tags=all"
     
-    POST_CATEGORY_MAP = {}
+    POST_CATEGORY_MAP = {
+        "0": constants.Category.GENERAL,
+        "1": constants.Category.ARTIST,
+        "3": constants.Category.COPYRIGHT,
+        "4": constants.Category.CHARACTER,
+        "5": constants.Category.META
+    }
 
     POST_SAFETY_MAPPING = {
         "general": constants.Safety.SAFE,
         "sensitive": constants.Safety.SKETCHY,
         "explicit": constants.Safety.UNSAFE
     }
+
+    REQUIRE_SOURCE_CHECK = True
 
 class GelbooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
     def __init__(self):
@@ -39,10 +47,11 @@ class GelbooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
 
     def get_sources(self, metadata:dict) -> list[str]:
         source:int = metadata.get("source", "")
+        post_url = self.get_post_url(metadata=metadata)
         if not source:
-            sources:list = []
+            sources:list = [post_url]
         else:
-            sources:list = [source]
+            sources:list = [source, post_url]
         return sources
 
     def get_description(self, metadata:dict) -> str:
@@ -89,9 +98,10 @@ class GelbooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
         post_id = self.get_id(metadata=metadata)
         url = f"{self.URL_BASE}/index.php?page=post&s=view&id={post_id}"
         return url
-
-    def get_pools(self, metadata:dict) -> list[resources.InternalPool]:
-        return []
+    
+    def get_deleted(self, metadata:dict) -> bool:
+        deleted:bool = metadata.get("is_deleted", False)
+        return deleted
 
 class GelbooruValidator(SharedAttributes, _plugin_template.ValidationPlugin):
     POST_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z0-9.-]+\/.+page=post.+)|(https:\/\/[a-zA-Z0-9.-]+\/+samples\/.+)")

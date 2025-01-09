@@ -6,6 +6,7 @@ from collections import defaultdict
 from copy import deepcopy
 from urllib.parse import urlparse
 from loguru import logger
+import hashlib
 
 from booru_tools.plugins._base import PluginBase
 from booru_tools.shared import constants
@@ -61,6 +62,7 @@ class InternalResource:
     origin: Optional[str] = None # This is the origin field of where this resource was pulled from, what source site/plugin was this created from?
     plugins: Optional[InternalPlugins] = field(default_factory=InternalPlugins) # The plugins object containing the appropriate metadata/api plugins
     metadata: Optional[Metadata] = field(default_factory=Metadata) # The metadata object containing the raw metadata and file location
+    deleted: bool = False
     _extra: Optional[defaultdict] = field(default_factory=default_extra) # This is for any extra plugin specific data that the plugin may need to retain for future actions, but doesn't fit into a regular Resource
 
     @classmethod
@@ -134,7 +136,7 @@ class InternalResource:
     
     @property
     def _default_diff_ignored_fields(self):
-        return ["plugins", "metadata", "_extra", "origin"]
+        return ["plugins", "metadata", "_extra", "origin", "deleted"]
 
 @dataclass(kw_only=True)
 class InternalTag(InternalResource):
@@ -208,7 +210,7 @@ class InternalPost(InternalResource):
     md5: Optional[str] = ""
     post_url: Optional[str] = ""
     pools: Optional[list["InternalPool"]] = field(default_factory=list)
-    local_file: Optional[Path] = None
+    local_file: InitVar[Path] = None
 
     def __eq__(self, other):
         if isinstance(other, InternalPost):
@@ -219,14 +221,13 @@ class InternalPost(InternalResource):
             return self.id == other
         return NotImplementedError
 
-    def __post_init__(self, sources):
-        if not sources:
-            self.sources = []
-        self.sources = sources
+    def __post_init__(self, sources:list=[], local_file:Path=None):
+        self.sources = sources if sources else []
+        self.local_file = local_file if local_file else None
     
     @property
     def _default_diff_ignored_fields(self):
-        return ["plugins", "metadata", "_extra", "relations", "score", "md5", "sha1", "local_file", "origin"]
+        return ["plugins", "metadata", "_extra", "relations", "score", "md5", "sha1", "local_file", "origin", "deleted"]
 
     @property
     def sources(self) -> list[str]:
@@ -239,7 +240,29 @@ class InternalPost(InternalResource):
     def sources_of_type(self, desired_source_type:str) -> list[str]:
         found_sources = []
         for source in self.sources:
-            source_domain = urlparse(url=source).hostname
+            
+            url_object = urlparse(url=source)
+
+            if url_object.scheme:
+                source_domain:str = url_object.hostname
+            else:
+                source_is_not_domain_like = "." not in source or " " in source
+                if source_is_not_domain_like:
+                    logger.warning(f"Could not parse domain from source '{source}'")
+                    continue
+                logger.debug(f"Source '{source}' does not have a scheme, adding 'https://'")
+                url = 'https://' + source
+                url_object = urlparse(url=url)
+                try:
+                    source_domain = url_object.hostname
+                except ValueError:
+                    logger.warning(f"Could not parse domain from source '{source}'")
+                    continue
+                    
+            if not source_domain:
+                logger.warning(f"Could not parse domain from source '{source}'")
+                continue
+            
             validator_plugin = self.plugins.find_matching_validator(domain=source_domain)
 
             if not validator_plugin:
@@ -256,14 +279,17 @@ class InternalPost(InternalResource):
         for tag in tags:
             if isinstance(tag, str):
                 if tag in post_tags:
-                    logger.debug(f"Post '{self.id}' contains tags from {tags}")
+                    logger.debug(f"Post '{self.id}' contains tag '{tag}'")
                     return True
             if isinstance(tag, list):
-                return self.contains_all_tags(tags=tag)
-            elif isinstance(tag, InternalTag):
+                contains_all_tags = self.contains_all_tags(tags=tag)
+                if contains_all_tags:
+                    logger.debug(f"Post '{self.id}' contains all tags '{tag}'")
+                    return True
+            if isinstance(tag, InternalTag):
                 tag_strings = set(tag.all_tag_strings())
                 if post_tags.intersection(tag_strings):
-                    logger.debug(f"Post '{self.id}' contains tags from {tags}")
+                    logger.debug(f"Post '{self.id}' contains tag from {tag.names}")
                     return True
         return False
     

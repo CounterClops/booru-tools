@@ -47,10 +47,11 @@ class DanbooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
 
     def get_sources(self, metadata:dict) -> list[str]:
         source:int = metadata.get("source", "")
+        post_url = self.get_post_url(metadata=metadata)
         if not source:
-            sources:list = []
+            sources:list = [post_url]
         else:
-            sources:list = [source]
+            sources:list = [source, post_url]
         return sources
 
     def get_description(self, metadata:dict) -> str:
@@ -110,6 +111,10 @@ class DanbooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
 
     def get_pools(self, metadata:dict) -> list[resources.InternalPool]:
         return []
+    
+    def get_deleted(self, metadata:dict) -> bool:
+        deleted:bool = metadata.get("is_deleted", False)
+        return deleted
 
 class DanbooruValidator(SharedAttributes, _plugin_template.ValidationPlugin):
     POST_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z0-9.-]+\/posts\/.+)|(https:\/\/[a-zA-Z0-9.-]+\/sample\/.+)|(https:\/\/[a-zA-Z0-9.-]+\/original\/.+)")

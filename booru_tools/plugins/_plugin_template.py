@@ -2,9 +2,11 @@ from loguru import logger
 from base64 import b64encode
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 import aiohttp
 import asyncio
 import re
+import json
 
 from booru_tools.shared import resources, errors, constants
 from booru_tools.plugins import _base
@@ -42,12 +44,74 @@ class MetadataPlugin(_base.PluginBase):
 
     def get_md5(self, metadata:dict) -> str:
         raise NotImplementedError
+    
+    def get_sha1(self, metadata:dict) -> str:
+        raise NotImplementedError
 
     def get_post_url(self, metadata:dict) -> str:
         raise NotImplementedError
 
     def get_pools(self, metadata:dict) -> list[resources.InternalPool]:
         raise NotImplementedError
+    
+    def get_deleted(self, metadata:dict) -> bool:
+        raise NotImplementedError
+    
+    def from_metadata_file(self, metadata_file:Path, plugins:resources.InternalPlugins=None) -> resources.InternalPost:
+        with open(metadata_file) as file:
+            metadata = resources.Metadata(
+                data=json.load(file),
+                file=metadata_file.absolute()
+            )
+        
+        if not plugins:
+            plugins = resources.InternalPlugins(
+                api=None,
+                meta=self
+            )
+
+        post_data = {
+            "plugins": plugins,
+            "metadata": metadata
+        }
+
+        metadata_attributes:dict[str, list[function, list[Any]]] = {
+            "id": [self.get_id, [metadata]],
+            "sources": [self.get_sources, [metadata]],
+            "description": [self.get_description, [metadata]],
+            "score": [self.get_score, [metadata]],
+            "tags": [self.get_tags, [metadata]],
+            "created_at": [self.get_created_at, [metadata]],
+            "updated_at": [self.get_updated_at, [metadata]],
+            "relations": [self.get_relations, [metadata]],
+            "safety": [self.get_safety, [metadata]],
+            "md5": [self.get_md5, [metadata]],
+            "sha": [self.get_sha1, [metadata]],
+            "deleted": [self.get_deleted, [metadata]],
+            "post_url": [self.get_post_url, [metadata]],
+            "pools": [self.get_pools, [metadata]],
+            "local_file": [self._get_media_file, [metadata_file]]
+        }
+
+        for key, attributes in metadata_attributes.items():
+            func, args = attributes
+            try:
+                post_data[key] = func(*args)
+            except NotImplementedError as e:
+                logger.debug(f"'{key}' not supported for '{self.__class__.__qualname__}' skipping")
+        
+        post = resources.InternalPost(
+            **post_data
+        )
+        
+        return post
+
+    def _get_media_file(self, metadata_file:Path) -> Path | None:
+        media_file = metadata_file.parent / metadata_file.stem
+        if media_file.exists():
+            logger.debug(f"Found '{media_file}' media file")
+            return media_file
+        return None
 
 class ValidationPlugin(_base.PluginBase):
     POST_URL_PATTERN:re.Pattern = None
@@ -77,7 +141,7 @@ class ApiPlugin(_base.PluginBase):
     def __init__(self, session: aiohttp.ClientSession = None):
         logger.debug(f"Loaded {self.__class__.__name__}")
         self.session = session
-        self.tmp_path = Path("tmp")
+        self.tmp_path = constants.TEMP_FOLDER
 
     @staticmethod
     def encode_auth_headers(user: str, token: str) -> str:

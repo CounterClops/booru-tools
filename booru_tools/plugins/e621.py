@@ -147,7 +147,7 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
             "User-Agent": "booru-tools/1.0"
         }
         self.tag_post_count_threshold = 5
-        self.tmp_path = Path("tmp")
+        self.tmp_path = constants.TEMP_FOLDER
 
     async def get_pool(self, id:int) -> resources.InternalPool:
         url = f"{self.URL_BASE}/pools.json?search[id]={id}"

@@ -15,6 +15,8 @@ class SharedAttributes:
     }
 
     URL_BASE = ""
+
+    REQUIRE_SOURCE_CHECK = False
     
     @property
     def DEFAULT_POST_SEARCH_URL(self):
@@ -22,7 +24,7 @@ class SharedAttributes:
             return f"{self.URL_BASE}/posts"
         return ""
 
-class PluginBase(SharedAttributes):
+class PluginBase(SharedAttributes, metaclass=constants.Singleton):
     def __init__(self):
         logger.debug(f"Loaded {self.__class__.__name__}")
 

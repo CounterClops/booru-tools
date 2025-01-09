@@ -48,7 +48,7 @@ class BooruTools:
         else:
             self.booru_plugin_directory = Path(booru_plugin_directory)
         
-        self.tmp_directory = Path(tmp_path)
+        self.tmp_directory = constants.TEMP_FOLDER
         self.config = config
         self.session_manager = SessionManager()
 
@@ -101,6 +101,16 @@ class BooruTools:
         if self.config["destination"]:
             self.destination_plugin:_plugin_template.ApiPlugin = self.api_loader.load_matching_plugin(domain=self.config["destination"], category=self.config["destination"])
     
+    async def find_exact_post(self, post:resources.InternalPost) -> resources.InternalPost | None:
+        logger.info(f"Getting exact post for '{post.id}'")
+
+        if post.post_url not in post.sources:
+            logger.debug(f"Adding post url '{post.post_url}' to sources for '{post.id}'")
+            post.sources.append(post.post_url)
+
+        exact_post = await self.destination_plugin.find_exact_post(post=post)
+        return exact_post
+
     async def update_posts(self, posts:list[resources.InternalPost]):
         logger.info(f"Updating {len(posts)} posts")
 
@@ -110,7 +120,7 @@ class BooruTools:
                 if not post.local_file:
                     logger.debug(f"No file to upload for '{post.id}'")
                 else:
-                    logger.debug(f"File {post.local_file.name} found for '{post.id}'")
+                    logger.debug(f"File '{post.local_file.name}' found for '{post.id}'")
                     post = self.add_missing_post_hashes(post=post)
 
                 if post.post_url:
@@ -159,32 +169,13 @@ class BooruTools:
         api_plugin:_plugin_template.ApiPlugin = self.api_loader.load_matching_plugin(domain=domain, category=post_category)
         validator_plugins:list[_plugin_template.ValidationPlugin] = self.validation_loader.load_all_plugins()
 
-        post_data = {
-            "id": metadata_plugin.get_id(metadata=metadata),
-            "category": post_category,
-            "sources": metadata_plugin.get_sources(metadata=metadata),
-            "description": metadata_plugin.get_description(metadata=metadata),
-            "score": metadata_plugin.get_score(metadata=metadata),
-            "tags": metadata_plugin.get_tags(metadata=metadata),
-            "created_at": metadata_plugin.get_created_at(metadata=metadata),
-            "updated_at": metadata_plugin.get_updated_at(metadata=metadata),
-            "relations": metadata_plugin.get_relations(metadata=metadata),
-            "safety": metadata_plugin.get_safety(metadata=metadata),
-            "md5": metadata_plugin.get_md5(metadata=metadata),
-            "post_url": metadata_plugin.get_post_url(metadata=metadata),
-            "pools": metadata_plugin.get_pools(metadata=metadata),
-            "local_file": self.get_media_file(metadata=metadata),
-            "plugins": resources.InternalPlugins(
-                api=api_plugin,
-                meta=metadata_plugin,
-                validators=validator_plugins
-            ),
-            "metadata": metadata
-        }
-        
-        post = resources.InternalPost(
-            **post_data
+        plugins = resources.InternalPlugins(
+            api=api_plugin,
+            meta=metadata_plugin,
+            validators=validator_plugins
         )
+        
+        post = metadata_plugin.from_metadata_file(metadata_file=metadata.file, plugins=plugins)
         
         return post
 
@@ -238,13 +229,24 @@ class BooruTools:
         return None
     
     def add_missing_post_hashes(self, post:resources.InternalPost) -> resources.InternalPost:
-        if not post.md5:
-            post.md5 = self.get_md5_hash(file_path=post.local_file)
-        if not post.sha1:
-            post.sha1 = self.get_sha1_hash(file_path=post.local_file)
+        file_md5 = self.get_md5_hash(file_path=post.local_file)
+        file_sha1 = self.get_sha1_hash(file_path=post.local_file)
+
+        if post.md5 != file_md5:
+            if post.md5:
+                logger.warning(f"Post '{post.id}' md5 hash '{post.md5}' is different from file md5 hash '{file_md5}'")
+            logger.debug(f"Updating post '{post.id}' md5 hash from '{post.md5}' to '{file_md5}'")
+            post.md5 = file_md5
+        if post.sha1 != file_sha1:
+            if post.sha1:
+                logger.warning(f"Post '{post.id}' sha1 hash '{post.sha1}' is different from file sha1 hash '{file_sha1}'")
+            logger.debug(f"Updating post '{post.id}' sha1 hash from '{post.sha1}' to '{file_sha1}'")
+            post.sha1 = file_sha1
+        
         return post
 
-    def get_md5_hash(self, file_path:Path) -> str:
+    @staticmethod
+    def get_md5_hash(file_path:Path) -> str:
         if not file_path.exists():
             return ""
         
@@ -258,7 +260,8 @@ class BooruTools:
         logger.debug(f"MD5 hash for '{file_path}' is '{md5_hash}'")
         return md5_hash
 
-    def get_sha1_hash(self, file_path:Path) -> str:
+    @staticmethod
+    def get_sha1_hash(file_path:Path) -> str:
         if not file_path.exists():
             return ""
         

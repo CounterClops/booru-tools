@@ -2,6 +2,7 @@ import click
 from loguru import logger
 from pathlib import Path
 import asyncio
+import traceback
 
 from booru_tools import core
 from booru_tools.shared import resources, constants
@@ -62,6 +63,7 @@ class ImportPostsCommand():
             url_base = url_base.rstrip("/")
             self.booru_tools.destination_plugin.URL_BASE = url_base
 
+        # Maybe expand this out to get tags from the destination plugin and populate aliases. Extra toggle maybe?
         self.blacklisted_tags = self.booru_tools.split_tag_list(blacklisted_tags)
         self.required_tags = self.booru_tools.split_tag_list(required_tags)
         self.allowed_blank_pages = allowed_blank_pages
@@ -82,6 +84,7 @@ class ImportPostsCommand():
                 await self._import_posts_from_url(url)
             except Exception as e:
                 logger.critical(f"url import failed with {e}")
+                logger.critical(traceback.format_exc())
 
         filtered_tags = self._filter_tags(tags=self.all_tags)
         await self.booru_tools.update_tags(tags=filtered_tags)
@@ -128,6 +131,9 @@ class ImportPostsCommand():
             return False
         if self.minimum_score and post.score < self.minimum_score:
             logger.debug(f"Post '{post.id}' has a score of {post.score} which is below the minimum score of {self.minimum_score}")
+            return False
+        if post.deleted:
+            logger.debug(f"Post '{post.id}' is marked as deleted")
             return False
         logger.debug(f"Post '{post.id}' passed all checks")
         return True
@@ -182,7 +188,7 @@ class ImportPostsCommand():
         async with asyncio.TaskGroup() as task_group:
             for post in posts:
                 task = task = task_group.create_task(
-                    self.booru_tools.destination_plugin.find_exact_post(post=post)
+                    self.booru_tools.find_exact_post(post=post)
                 )
                 existing_posts[post.id] = task
         return existing_posts
