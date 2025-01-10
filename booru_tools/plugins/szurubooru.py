@@ -1071,7 +1071,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             "names": tag.names
         }
 
-        if tag.category != constants.Category._DEFAULT:
+        if tag.category != constants.TagCategory._DEFAULT:
             data["category"] = tag.category
 
         if tag.implications:

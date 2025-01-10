@@ -23,15 +23,15 @@ class SharedAttributes:
     _NAME = "e621"
 
     POST_CATEGORY_MAP = {
-        "0": constants.Category.GENERAL,
-        "1": constants.Category.ARTIST,
-        "2": constants.Category.CONTRIBUTOR,
-        "3": constants.Category.COPYRIGHT,
-        "4": constants.Category.CHARACTER,
-        "5": constants.Category.SPECIES,
-        "6": constants.Category.INVALID,
-        "7": constants.Category.META,
-        "8": constants.Category.LORE
+        "0": constants.TagCategory.GENERAL,
+        "1": constants.TagCategory.ARTIST,
+        "2": constants.TagCategory.CONTRIBUTOR,
+        "3": constants.TagCategory.COPYRIGHT,
+        "4": constants.TagCategory.CHARACTER,
+        "5": constants.TagCategory.SPECIES,
+        "6": constants.TagCategory.INVALID,
+        "7": constants.TagCategory.META,
+        "8": constants.TagCategory.LORE
     }
 
     POST_SAFETY_MAPPING = {
@@ -193,10 +193,10 @@ class E621Client(SharedAttributes, _plugin_template.ApiPlugin):
                     # logger.debug(f"Skipping tag '{name}' as its under the post_count threshold of {self.tag_post_count_threshold}")
                     continue
 
-                category = self.POST_CATEGORY_MAP.get(category_id, constants.Category._DEFAULT)
+                category = self.POST_CATEGORY_MAP.get(category_id, constants.TagCategory._DEFAULT)
 
-                if category == constants.Category.INVALID:
-                    # logger.debug(f"Skipping tag '{name}' as its in the {constants.Category.INVALID} category")
+                if category == constants.TagCategory.INVALID:
+                    # logger.debug(f"Skipping tag '{name}' as its in the {constants.TagCategory.INVALID} category")
                     continue
                 
                 tags[name] = resources.InternalTag(

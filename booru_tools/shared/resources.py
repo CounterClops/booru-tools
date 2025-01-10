@@ -141,7 +141,7 @@ class InternalResource:
 @dataclass(kw_only=True)
 class InternalTag(InternalResource):
     names: list[str] # The list of names for this tag
-    category: Optional[str] = constants.Category._DEFAULT # The tag category string
+    category: Optional[str] = constants.TagCategory._DEFAULT # The tag category string
     implications: Optional[list["InternalTag"]] = field(default_factory=list) # A list of all tags this specific tag implies.
 
     def __eq__(self, other):

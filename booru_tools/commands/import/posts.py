@@ -7,7 +7,7 @@ import traceback
 from booru_tools import core
 from booru_tools.shared import resources, constants
 from booru_tools.plugins import _plugin_template
-from booru_tools.downloaders.gallery_dl import GalleryDl
+from booru_tools.tools.gallery_dl import GalleryDl
 
 
 class ImportPostsCommand():
@@ -86,14 +86,15 @@ class ImportPostsCommand():
                 logger.critical(f"url import failed with {e}")
                 logger.critical(traceback.format_exc())
 
-        filtered_tags = self._filter_tags(tags=self.all_tags)
-        await self.booru_tools.update_tags(tags=filtered_tags)
+            # filtered_tags = self._filter_tags(tags=self.all_tags)
+            # await self.booru_tools.update_tags(tags=filtered_tags)
+            # self.all_tags = []
         
         self.booru_tools.cleanup_process_directories()
         await self.booru_tools.session_manager.close()
     
     def _filter_tags(self, tags:list[resources.InternalTag]) -> list[resources.InternalTag]:
-        filtered_tags = [tag for tag in tags if tag.category != constants.Category._DEFAULT]
+        filtered_tags = [tag for tag in tags if tag.category != constants.TagCategory._DEFAULT]
         logger.debug(f"Filtered out tags in default category, going from {len(tags)} tags to {len(filtered_tags)} tags")
         return filtered_tags
 

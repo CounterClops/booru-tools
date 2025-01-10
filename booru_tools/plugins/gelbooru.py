@@ -21,11 +21,11 @@ class SharedAttributes:
         return f"{self.URL_BASE}/index.php?page=post&s=list&tags=all"
     
     POST_CATEGORY_MAP = {
-        "0": constants.Category.GENERAL,
-        "1": constants.Category.ARTIST,
-        "3": constants.Category.COPYRIGHT,
-        "4": constants.Category.CHARACTER,
-        "5": constants.Category.META
+        "0": constants.TagCategory.GENERAL,
+        "1": constants.TagCategory.ARTIST,
+        "3": constants.TagCategory.COPYRIGHT,
+        "4": constants.TagCategory.CHARACTER,
+        "5": constants.TagCategory.META
     }
 
     POST_SAFETY_MAPPING = {

@@ -22,17 +22,17 @@ class SharedAttributes:
         return f"{self.URL_BASE}/images"
     
     POST_CATEGORY_MAP = {
-        "artist": constants.Category.ARTIST,
-        "editor": constants.Category.CONTRIBUTOR,
-        "commissioner": constants.Category.CONTRIBUTOR,
-        "oc": constants.Category.CHARACTER,
-        "my little pony": constants.Category.COPYRIGHT,
-        "comic": constants.Category.COPYRIGHT,
-        "series": constants.Category.COPYRIGHT,
-        "tumblr": constants.Category.COPYRIGHT,
-        "art pack": constants.Category.COPYRIGHT,
-        "ship": constants.Category.LORE,
-        "generator": constants.Category.META,
+        "artist": constants.TagCategory.ARTIST,
+        "editor": constants.TagCategory.CONTRIBUTOR,
+        "commissioner": constants.TagCategory.CONTRIBUTOR,
+        "oc": constants.TagCategory.CHARACTER,
+        "my little pony": constants.TagCategory.COPYRIGHT,
+        "comic": constants.TagCategory.COPYRIGHT,
+        "series": constants.TagCategory.COPYRIGHT,
+        "tumblr": constants.TagCategory.COPYRIGHT,
+        "art pack": constants.TagCategory.COPYRIGHT,
+        "ship": constants.TagCategory.LORE,
+        "generator": constants.TagCategory.META,
     }
 
     POST_SAFETY_MAPPING = {
@@ -122,7 +122,7 @@ class DerpibooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
         raw_tag_category = None
 
         category_tag_checks = [
-            split_tag[0], # Check there is something before the :
+            split_tag[0], # Check there is something before the : that is not blank
             len(tag) > 3, # Check the tag is longer than 3 characters
             len(split_tag) > 1, # Check the items in the split tag list is greater than 1
         ]
@@ -130,14 +130,14 @@ class DerpibooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
         if not all(category_tag_checks):
             tag_name = tag.replace(" ", "_").replace("__", "_")
             if tag_name == ["useless_source_url", "source needed"]:
-                tag_category = constants.Category.META
+                tag_category = constants.TagCategory.META
             else:
-                tag_category = constants.Category._DEFAULT
+                tag_category = constants.TagCategory._DEFAULT
             return tag_name, tag_category, tag_implications
         
         raw_tag_category, tag_name = split_tag
-        tag_category = self.POST_CATEGORY_MAP.get(raw_tag_category, constants.Category._DEFAULT)
-        if tag_category == constants.Category._DEFAULT:
+        tag_category = self.POST_CATEGORY_MAP.get(raw_tag_category, constants.TagCategory._DEFAULT)
+        if tag_category == constants.TagCategory._DEFAULT:
             logger.warning(f"Unknown tag category: {raw_tag_category}")
   
         tag_name = tag_name.replace(" ", "_").replace("__", "_")
@@ -145,10 +145,10 @@ class DerpibooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
         if raw_tag_category == "spoiler":
             return None, None
         elif raw_tag_category == "parent":
-            tag_category = constants.Category.LORE
+            tag_category = constants.TagCategory.LORE
             tag_name = f"parent_{tag_name}"
         elif raw_tag_category == "parents":
-            tag_category = constants.Category.LORE
+            tag_category = constants.TagCategory.LORE
             tag_name = f"parents_{tag_name}"
         elif raw_tag_category == "my little pony":
             tag_name = f"my_little_pony_{tag_name}"
@@ -156,10 +156,10 @@ class DerpibooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
         elif raw_tag_category == "fusion":
             tag_implications.append(tag_name)
             tag_name = f"fusion_{tag_name}"
-            tag_category = constants.Category.META
+            tag_category = constants.TagCategory.LORE
         elif raw_tag_category == "ship":
             tag_name = f"ship_{tag_name}"
-            tag_category = constants.Category.META
+            tag_category = constants.TagCategory.LORE
 
         return tag_name, tag_category, tag_implications
 

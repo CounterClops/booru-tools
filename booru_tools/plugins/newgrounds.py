@@ -78,7 +78,7 @@ class NewgroundsMeta(SharedAttributes, _plugin_template.MetadataPlugin):
         for tag in artists:
             tag = resources.InternalTag(
                 names=[tag],
-                category=constants.Category.ARTIST
+                category=constants.TagCategory.ARTIST
             )
             all_tags.append(tag)
         

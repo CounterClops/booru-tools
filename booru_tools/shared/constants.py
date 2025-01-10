@@ -3,7 +3,7 @@ from pathlib import Path
 ROOT_FOLDER = Path(__file__).parent.parent
 TEMP_FOLDER = Path("tmp")
 
-class Category:
+class TagCategory:
     GENERAL = "General"
     ARTIST = "Artist"
     CONTRIBUTOR = "Contributor"
