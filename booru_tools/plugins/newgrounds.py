@@ -30,6 +30,8 @@ class SharedAttributes:
         "a": constants.Safety.UNSAFE
     }
 
+    REQUIRE_SOURCE_CHECK = True
+
 class NewgroundsValidator(SharedAttributes, _plugin_template.ValidationPlugin):
     POST_URL_PATTERN = re.compile(r"(https:\/\/[w.]*newgrounds\.com\/portal\/view\/\d+)")
     USER_URL_PATTERN = re.compile(r"(https:\/\/(?!www\.)\w+\.newgrounds\.com)")
@@ -100,20 +102,11 @@ class NewgroundsMeta(SharedAttributes, _plugin_template.MetadataPlugin):
     def get_updated_at(self, metadata:dict) -> datetime:
         return self.get_created_at(metadata=metadata)
 
-    def get_relations(self, metadata:dict) -> resources.InternalRelationship:
-        return resources.InternalRelationship()
-
     def get_safety(self, metadata:dict) -> str:
         rating:str = metadata["rating"]
         safety:str = self.POST_SAFETY_MAPPING.get(rating, constants.Safety._DEFAULT)
         return safety
 
-    def get_md5(self, metadata:dict) -> str:
-        return ""
-
     def get_post_url(self, metadata:dict) -> str:
         post_url:str = metadata['post_url']
         return post_url
-
-    def get_pools(self, metadata:dict) -> list[resources.InternalPool]:
-        return []

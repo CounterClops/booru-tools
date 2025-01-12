@@ -92,9 +92,6 @@ class DanbooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
         datetime_obj:datetime = datetime.fromisoformat(datetime_str)
         return datetime_obj
 
-    def get_relations(self, metadata:dict) -> resources.InternalRelationship:
-        return resources.InternalRelationship()
-
     def get_safety(self, metadata:dict) -> str:
         rating:str = metadata["rating"]
         safety:str = self.POST_SAFETY_MAPPING.get(rating, constants.Safety._DEFAULT)
@@ -126,3 +123,8 @@ class DanbooruValidator(SharedAttributes, _plugin_template.ValidationPlugin):
         if self.GLOBAL_URL_PATTERN.match(url):
             return constants.SourceTypes.GLOBAL
         return constants.SourceTypes._DEFAULT
+    
+# https://danbooru.donmai.us/wiki_pages/api%3Atags
+# https://danbooru.donmai.us/tags.json
+# https://danbooru.donmai.us/tag_aliases.json
+# https://danbooru.donmai.us/tag_implications.json

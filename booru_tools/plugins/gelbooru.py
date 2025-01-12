@@ -53,9 +53,6 @@ class GelbooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
         else:
             sources:list = [source, post_url]
         return sources
-
-    def get_description(self, metadata:dict) -> str:
-        return ""
     
     def get_score(self, metadata:dict) -> int:
         score:int = metadata.get("score", 0)
@@ -81,9 +78,6 @@ class GelbooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
 
     def get_updated_at(self, metadata:dict) -> datetime:
         return self.get_created_at(metadata=metadata)
-
-    def get_relations(self, metadata:dict) -> resources.InternalRelationship:
-        return resources.InternalRelationship()
 
     def get_safety(self, metadata:dict) -> str:
         rating:str = metadata["rating"]
