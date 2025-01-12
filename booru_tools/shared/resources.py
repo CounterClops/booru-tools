@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field, fields, MISSING, InitVar
 from datetime import datetime
-from typing import Optional, Any
+from typing import Any
 from pathlib import Path
 from collections import defaultdict
 from copy import deepcopy
@@ -10,6 +10,8 @@ import hashlib
 
 from booru_tools.plugins._base import PluginBase
 from booru_tools.shared import constants
+
+# https://florimond.dev/en/posts/2018/10/reconciling-dataclasses-and-properties-in-python
 
 class UniqueList(list):
     def append(self, item):
@@ -59,11 +61,11 @@ def default_extra():
 
 @dataclass(kw_only=True)
 class InternalResource:
-    origin: Optional[str] = None # This is the origin field of where this resource was pulled from, what source site/plugin was this created from?
-    plugins: Optional[InternalPlugins] = field(default_factory=InternalPlugins) # The plugins object containing the appropriate metadata/api plugins
-    metadata: Optional[Metadata] = field(default_factory=Metadata) # The metadata object containing the raw metadata and file location
+    origin: str = None # This is the origin field of where this resource was pulled from, what source site/plugin was this created from?
+    plugins: InternalPlugins = field(default_factory=InternalPlugins) # The plugins object containing the appropriate metadata/api plugins
+    metadata: Metadata = field(default_factory=Metadata) # The metadata object containing the raw metadata and file location
     deleted: bool = False
-    _extra: Optional[defaultdict] = field(default_factory=default_extra) # This is for any extra plugin specific data that the plugin may need to retain for future actions, but doesn't fit into a regular Resource
+    _extra: defaultdict = field(default_factory=default_extra) # This is for any extra plugin specific data that the plugin may need to retain for future actions, but doesn't fit into a regular Resource
 
     @classmethod
     def from_dict(cls, data: dict) -> "InternalResource":
@@ -109,7 +111,7 @@ class InternalResource:
                     old_value.update(new_value)
 
             setattr(resource, field.name, new_value)
-        
+            
         return resource
     
     def diff(self, resource:"InternalResource", fields_to_ignore:list=[]) -> dict[str, Any]:
@@ -141,8 +143,8 @@ class InternalResource:
 @dataclass(kw_only=True)
 class InternalTag(InternalResource):
     names: list[str] # The list of names for this tag
-    category: Optional[str] = constants.TagCategory._DEFAULT # The tag category string
-    implications: Optional[list["InternalTag"]] = field(default_factory=list) # A list of all tags this specific tag implies.
+    category: str = constants.TagCategory._DEFAULT # The tag category string
+    implications: list["InternalTag"] = field(default_factory=list) # A list of all tags this specific tag implies.
 
     def __eq__(self, other):
         if isinstance(other, InternalTag):
@@ -184,8 +186,8 @@ class InternalTag(InternalResource):
 
 @dataclass(kw_only=True)
 class InternalRelationship:
-    parent_id: Optional[int] = None
-    children: Optional[list[int]] = field(default_factory=list)
+    parent_id: int = None
+    children: list[int] = field(default_factory=list)
 
     @property
     def related_post_ids(self) -> list[int]:
@@ -197,19 +199,20 @@ class InternalRelationship:
 @dataclass(kw_only=True)
 class InternalPost(InternalResource):
     id: int
-    category: Optional[str] = ""
-    description: Optional[str] = ""
+    category: str = ""
+    description: str = ""
     score: int = 0
-    tags: Optional[list[InternalTag]] = field(default_factory=list)
-    sources: InitVar[list[str]] = field(default_factory=UniqueList)
+    tags: list[InternalTag] = field(default_factory=list)
+    sources: list[str] = field(default_factory=UniqueList)
+    _sources: UniqueList[str] = field(init=False, repr=False)
     created_at: datetime = None
     updated_at: datetime = None
-    relations: Optional[InternalRelationship] = field(default_factory=InternalRelationship)
-    safety: Optional[str] = constants.Safety._DEFAULT
-    sha1: Optional[str] = ""
-    md5: Optional[str] = ""
-    post_url: Optional[str] = ""
-    pools: Optional[list["InternalPool"]] = field(default_factory=list)
+    relations: InternalRelationship = field(default_factory=InternalRelationship)
+    safety: str = constants.Safety._DEFAULT
+    sha1: str = ""
+    md5: str = ""
+    post_url: str = ""
+    pools: list["InternalPool"] = field(default_factory=list)
     local_file: InitVar[Path] = None
 
     def __eq__(self, other):
@@ -221,21 +224,20 @@ class InternalPost(InternalResource):
             return self.id == other
         return NotImplementedError
 
-    def __post_init__(self, sources:list=[], local_file:Path=None):
-        self.sources = sources if sources else []
+    def __post_init__(self, local_file:Path=None):
         self.local_file = local_file if local_file else None
     
     @property
     def _default_diff_ignored_fields(self):
-        return ["plugins", "metadata", "_extra", "relations", "score", "md5", "sha1", "local_file", "origin", "deleted"]
+        return ["plugins", "metadata", "_extra", "relations", "score", "md5", "sha1", "local_file", "origin", "deleted", "_sources"]
 
     @property
     def sources(self) -> list[str]:
         return self._sources
 
     @sources.setter
-    def sources(self, value) -> None:
-        self._sources = UniqueList(set(value))
+    def sources(self, sources:list) -> None:
+        self._sources = UniqueList(set(sources))
 
     def sources_of_type(self, desired_source_type:str) -> list[str]:
         found_sources = []
@@ -329,20 +331,36 @@ class InternalPost(InternalResource):
     def from_dict(cls, data: dict) -> "InternalPost":
         data = cls.filter_valid_keys(data=data)
         if 'tags' in data and data['tags']:
-            data['tags'] = [InternalTag.from_dict(tag) for tag in data['tags']]
+            tags = []
+            for tag in data['tags']:
+                if isinstance(tag, str):
+                    tags.append(InternalTag(names=[tag]))
+                elif isinstance(tag, dict):
+                    tags.append(InternalTag.from_dict(tag))
+                elif isinstance(tag, InternalTag):
+                    tags.append(tag)
+            data['tags'] = tags
         if 'pools' in data and data['pools']:
-            data['pools'] = [InternalPool.from_dict(pool) for pool in data['pools']]
+            pools = []
+            for pool in data['pools']:
+                if isinstance(pool, int):
+                    pools.append(InternalTag(id=pool))
+                elif isinstance(pool, dict):
+                    pools.append(InternalTag.from_dict(pool))
+                elif isinstance(pool, InternalPool):
+                    pools.append(pool)
+            data['pools'] = pools
         return cls(**data)
 
 @dataclass(kw_only=True)
 class InternalPool(InternalResource):
     id: int
-    names: Optional[list[str]] = field(default_factory=list)
-    category: Optional[str] = ""
-    description: Optional[str] = ""
-    posts: Optional[list[InternalPost]] = field(default_factory=list)
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    names: list[str] = field(default_factory=list)
+    category: str = ""
+    description: str = ""
+    posts: list[InternalPost] = field(default_factory=list)
+    created_at: datetime = None
+    updated_at: datetime = None
 
     def __eq__(self, other):
         if isinstance(other, InternalPost):
