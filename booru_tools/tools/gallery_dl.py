@@ -3,7 +3,7 @@ from datetime import datetime
 from pathlib import Path
 from loguru import logger
 
-class GalleryDl:
+class GalleryDl():
     def __init__(self, tmp_path:Path=Path("tmp"), cookies:str="", urls:dict=[], input_file:str="", verbose:bool=False, warning:bool=True):
         self.tmp_path = tmp_path
         self.basic_params = []

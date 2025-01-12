@@ -10,10 +10,14 @@ import json
 
 from booru_tools.shared import resources, errors, constants
 from booru_tools.plugins import _base
+from booru_tools.downloaders import gallerydl
 
 class MetadataPlugin(_base.PluginBase):
+    DOWNLOADER_CONFIG = {}
+
     def __init__(self):
         logger.debug(f"Loaded {self.__class__.__name__}")
+        # self.DOWNLOADER = gallerydl(config=self.DOWNLOADER_CONFIG)
 
     def get_id(self, metadata:dict) -> int:
         raise NotImplementedError
