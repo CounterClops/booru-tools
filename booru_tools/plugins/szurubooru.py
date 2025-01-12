@@ -1425,6 +1425,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             time_period=1
         )
 
+        timeout = aiohttp.ClientTimeout(total=300)
+
         with open(file, "rb") as file_content:
             form = aiohttp.FormData()
             form.add_field("content", file_content, filename=file.name)
@@ -1432,7 +1434,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             async with self.session.post(
                     url=url,
                     headers=self.headers,
-                    data=form
+                    data=form,
+                    timeout=timeout
                 ) as response, rate_limiter:
                 response_json = await response.json()
                 try:
