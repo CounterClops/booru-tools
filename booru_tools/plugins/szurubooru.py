@@ -153,52 +153,51 @@ P = ParamSpec("P")
 R = TypeVar('R')
 
 class SzurubooruErrorHandler:
-    def __init__(self) -> None:
-        self.error_map = {
-            "MissingRequiredFileError": MissingRequiredFileError,
-            "MissingRequiredParameterError": MissingRequiredParameterError,
-            "InvalidParameterError": InvalidParameterError,
-            "IntegrityError": IntegrityError,
-            "SearchError": SearchError,
-            "AuthError": AuthError,
-            "PostNotFoundError": PostNotFoundError,
-            "PostAlreadyFeaturedError": PostAlreadyFeaturedError,
-            "PostAlreadyUploadedError": PostAlreadyUploadedError,
-            "InvalidPostIdError": InvalidPostIdError,
-            "InvalidPostSafetyError": InvalidPostSafetyError,
-            "InvalidPostSourceError": InvalidPostSourceError,
-            "InvalidPostContentError": InvalidPostContentError,
-            "InvalidPostRelationError": InvalidPostRelationError,
-            "InvalidPostNoteError": InvalidPostNoteError,
-            "InvalidPostFlagError": InvalidPostFlagError,
-            "InvalidFavoriteTargetError": InvalidFavoriteTargetError,
-            "InvalidCommentIdError": InvalidCommentIdError,
-            "CommentNotFoundError": CommentNotFoundError,
-            "EmptyCommentTextError": EmptyCommentTextError,
-            "InvalidScoreTargetError": InvalidScoreTargetError,
-            "InvalidScoreValueError": InvalidScoreValueError,
-            "TagCategoryNotFoundError": TagCategoryNotFoundError,
-            "TagCategoryAlreadyExistsError": TagCategoryAlreadyExistsError,
-            "TagCategoryIsInUseError": TagCategoryIsInUseError,
-            "InvalidTagCategoryNameError": InvalidTagCategoryNameError,
-            "InvalidTagCategoryColorError": InvalidTagCategoryColorError,
-            "TagNotFoundError": TagNotFoundError,
-            "TagAlreadyExistsError": TagAlreadyExistsError,
-            "TagIsInUseError": TagIsInUseError,
-            "InvalidTagNameError": InvalidTagNameError,
-            "InvalidTagRelationError": InvalidTagRelationError,
-            "InvalidTagCategoryError": InvalidTagCategoryError,
-            "InvalidTagDescriptionError": InvalidTagDescriptionError,
-            "UserNotFoundError": UserNotFoundError,
-            "UserAlreadyExistsError": UserAlreadyExistsError,
-            "InvalidUserNameError": InvalidUserNameError,
-            "InvalidEmailError": InvalidEmailError,
-            "InvalidPasswordError": InvalidPasswordError,
-            "InvalidRankError": InvalidRankError,
-            "InvalidAvatarError": InvalidAvatarError,
-            "ProcessingError": ProcessingError,
-            "ValidationError": ValidationError
-        }
+    ERROR_MAP = {
+        "MissingRequiredFileError": MissingRequiredFileError,
+        "MissingRequiredParameterError": MissingRequiredParameterError,
+        "InvalidParameterError": InvalidParameterError,
+        "IntegrityError": IntegrityError,
+        "SearchError": SearchError,
+        "AuthError": AuthError,
+        "PostNotFoundError": PostNotFoundError,
+        "PostAlreadyFeaturedError": PostAlreadyFeaturedError,
+        "PostAlreadyUploadedError": PostAlreadyUploadedError,
+        "InvalidPostIdError": InvalidPostIdError,
+        "InvalidPostSafetyError": InvalidPostSafetyError,
+        "InvalidPostSourceError": InvalidPostSourceError,
+        "InvalidPostContentError": InvalidPostContentError,
+        "InvalidPostRelationError": InvalidPostRelationError,
+        "InvalidPostNoteError": InvalidPostNoteError,
+        "InvalidPostFlagError": InvalidPostFlagError,
+        "InvalidFavoriteTargetError": InvalidFavoriteTargetError,
+        "InvalidCommentIdError": InvalidCommentIdError,
+        "CommentNotFoundError": CommentNotFoundError,
+        "EmptyCommentTextError": EmptyCommentTextError,
+        "InvalidScoreTargetError": InvalidScoreTargetError,
+        "InvalidScoreValueError": InvalidScoreValueError,
+        "TagCategoryNotFoundError": TagCategoryNotFoundError,
+        "TagCategoryAlreadyExistsError": TagCategoryAlreadyExistsError,
+        "TagCategoryIsInUseError": TagCategoryIsInUseError,
+        "InvalidTagCategoryNameError": InvalidTagCategoryNameError,
+        "InvalidTagCategoryColorError": InvalidTagCategoryColorError,
+        "TagNotFoundError": TagNotFoundError,
+        "TagAlreadyExistsError": TagAlreadyExistsError,
+        "TagIsInUseError": TagIsInUseError,
+        "InvalidTagNameError": InvalidTagNameError,
+        "InvalidTagRelationError": InvalidTagRelationError,
+        "InvalidTagCategoryError": InvalidTagCategoryError,
+        "InvalidTagDescriptionError": InvalidTagDescriptionError,
+        "UserNotFoundError": UserNotFoundError,
+        "UserAlreadyExistsError": UserAlreadyExistsError,
+        "InvalidUserNameError": InvalidUserNameError,
+        "InvalidEmailError": InvalidEmailError,
+        "InvalidPasswordError": InvalidPasswordError,
+        "InvalidRankError": InvalidRankError,
+        "InvalidAvatarError": InvalidAvatarError,
+        "ProcessingError": ProcessingError,
+        "ValidationError": ValidationError
+    }
 
     def __call__(self, func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
         @functools.wraps(func)
@@ -211,7 +210,7 @@ class SzurubooruErrorHandler:
                     error_json:dict = json.loads(error.message)
                     szurubooru_error_name = error_json.get("name")
                     szurubooru_error_description = error_json.get("description")
-                    szurubooru_error_class = self.error_map[szurubooru_error_name]
+                    szurubooru_error_class = self.ERROR_MAP[szurubooru_error_name]
                     message = f"HTTP Error {error.status}: '{szurubooru_error_name}' {szurubooru_error_description}"
                     raise szurubooru_error_class(message)
                 except json.decoder.JSONDecodeError as e:
@@ -498,7 +497,6 @@ class Post(MicroPost):
             kwargs["id"] = self.id
         if self.tags:
             kwargs["tags"] = [tag.to_resource() for tag in self.tags]
-        kwargs["sources"] = self.sources
         if self.creationTime:
             kwargs["created_at"] = datetime.fromisoformat(self.creationTime)
         if self.lastEditTime:
@@ -514,12 +512,15 @@ class Post(MicroPost):
         if self.pools:
             kwargs["pools"] = [pool.to_resource() for pool in self.pools]
 
-        kwargs["category"] = "szurubooru"
+        kwargs["origin"] = "szurubooru"
+        kwargs["sources"] = self.sources
 
         if self.version:
             kwargs["_extra"]["szurubooru"]["version"] = self.version
 
-        return resources.InternalPost(**kwargs)
+        # return resources.InternalPost(**kwargs)
+        post = resources.InternalPost.from_dict(kwargs)
+        return post
 
 @dataclass(kw_only=True)
 class Pool(MicroPool):
@@ -663,7 +664,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             try:
                 found_post:Post = post_search.results[0]
                 logger.debug(f"Post found with md5: {found_post.checksumMD5}")
-                return found_post.to_resource()
+                found_resource = found_post.to_resource()
+                return found_resource
             except IndexError:
                 logger.debug(f"Post not found with md5: {post.md5}")
         
@@ -907,7 +909,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             "pools",
             "deleted"
         ]
-        proposed_changes = desired_post.diff(resource=post, fields_to_ignore=diff_ignored_fields)
+        proposed_changes = desired_post.diff(resource=exact_post, fields_to_ignore=diff_ignored_fields)
         
         if not proposed_changes:
             logger.debug(f"No changes found in post ({exact_post.id})")
@@ -1251,7 +1253,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
     @ProcessingErrorWarnAndSkip()
     @errors.RetryOnExceptions(
         exceptions=[errors.GatewayTimeout],
-        wait_time=30,
+        wait_time=60,
         retry_limit=6
     )
     @SzurubooruErrorHandler()
@@ -1278,11 +1280,16 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         logger.debug(f"Creating post with data={data}")
 
+        rate_limiter = AsyncLimiter(
+            max_rate=1,
+            time_period=1
+        )
+
         async with self.session.post(
                 url=url,
                 headers=self.headers,
                 json=data
-            ) as response, self.rate_limiter:
+            ) as response, rate_limiter:
             try:
                 response.raise_for_status()
             except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
@@ -1396,7 +1403,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
     @errors.RetryOnExceptions(
         exceptions=[errors.GatewayTimeout],
-        wait_time=30,
+        wait_time=60,
         retry_limit=6
     )
     @SzurubooruErrorHandler()
@@ -1413,6 +1420,11 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         logger.debug(f"Uploading file '{file}' to temporary endpoint")
 
+        rate_limiter = AsyncLimiter(
+            max_rate=1,
+            time_period=1
+        )
+
         with open(file, "rb") as file_content:
             form = aiohttp.FormData()
             form.add_field("content", file_content, filename=file.name)
@@ -1421,7 +1433,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                     url=url,
                     headers=self.headers,
                     data=form
-                ) as response, self.rate_limiter:
+                ) as response, rate_limiter:
                 response_json = await response.json()
                 try:
                     response.raise_for_status()

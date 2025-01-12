@@ -19,7 +19,7 @@ class GracefulExit(SystemExit):
 class SessionManager:
     def __init__(self):
         self.session = None
-        self.limit_per_host = 25
+        self.limit_per_host = 20
         self.default_headers = {
             "User-Agent": "BooruTools/1.0"
         }
