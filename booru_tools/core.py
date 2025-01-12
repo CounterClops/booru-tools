@@ -42,6 +42,12 @@ class SessionManager:
     async def close(self):
         logger.debug("Closing aiohttp session")
         await self.session.close()
+
+    def load_cookies(self, cookies:dict) -> None:
+        self.cookies = cookies
+
+        if not self.session.closed:
+            self.session.cookie_jar.update_cookies(cookies)
     
     def load_cookie_file(self, cookie_file:Path) -> dict:
         cookies = {}
@@ -64,10 +70,7 @@ class SessionManager:
         else:
             raise ValueError("Unsupported file format. Only .txt and .json are supported.")
 
-        self.cookies = cookies
-        if not self.session.closed:
-            self.session.cookie_jar.update_cookies(cookies)
-
+        self.load_cookies(cookies)
         return cookies
 
 
