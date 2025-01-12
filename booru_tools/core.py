@@ -2,6 +2,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from loguru import logger
 from collections import defaultdict
+from http.cookiejar import MozillaCookieJar
 import json
 import shutil
 import hashlib
@@ -23,6 +24,7 @@ class SessionManager:
         self.default_headers = {
             "User-Agent": "BooruTools/1.0"
         }
+        self.cookies = {}
 
     def start(self) -> aiohttp.ClientSession:
         connector = aiohttp.TCPConnector(
@@ -32,13 +34,42 @@ class SessionManager:
             self.session = aiohttp.ClientSession(
                 headers=self.default_headers,
                 skip_auto_headers=self.default_headers.keys(),
-                connector=connector
+                connector=connector,
+                cookies=self.cookies
             )
         return self.session
 
     async def close(self):
         logger.debug("Closing aiohttp session")
         await self.session.close()
+    
+    def load_cookie_file(self, cookie_file:Path) -> dict:
+        cookies = {}
+
+        if not cookie_file.exists():
+            raise FileNotFoundError(f"Cookie file '{cookie_file}' does not exist")
+        
+        cookie_file = Path(cookie_file)
+
+        if cookie_file.suffix == ".txt":
+            # Load cookies from cookies.txt
+            cookie_jar = MozillaCookieJar()
+            cookie_jar.load(cookie_file, ignore_discard=True, ignore_expires=True)
+            for cookie in cookie_jar:
+                cookies[cookie.name] = cookie.value
+        elif cookie_file.suffix == ".json":
+            # Load cookies from cookies.json
+            with open(cookie_file, "r") as f:
+                cookies = json.load(f)
+        else:
+            raise ValueError("Unsupported file format. Only .txt and .json are supported.")
+
+        self.cookies = cookies
+        if not self.session.closed:
+            self.session.cookie_jar.update_cookies(cookies)
+
+        return cookies
+
 
 class BooruTools:
     def __init__(self, booru_plugin_directory:Path="", config:dict=defaultdict(dict), tmp_path:str="tmp"):
