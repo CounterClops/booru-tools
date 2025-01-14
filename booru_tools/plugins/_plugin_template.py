@@ -13,11 +13,10 @@ from booru_tools.plugins import _base
 from booru_tools.downloaders import gallerydl
 
 class MetadataPlugin(_base.PluginBase):
-    DOWNLOADER_CONFIG = {}
+    DOWNLOAD_MANAGER = gallerydl.GalleryDlManager()
 
     def __init__(self):
         logger.debug(f"Loaded {self.__class__.__name__}")
-        # self.DOWNLOADER = gallerydl(config=self.DOWNLOADER_CONFIG)
 
     def get_id(self, metadata:dict) -> int:
         raise NotImplementedError
@@ -60,7 +59,7 @@ class MetadataPlugin(_base.PluginBase):
     
     def get_deleted(self, metadata:dict) -> bool:
         raise NotImplementedError
-    
+
     def from_metadata_file(self, metadata_file:Path, plugins:resources.InternalPlugins=None) -> resources.InternalPost:
         with open(metadata_file) as file:
             metadata = resources.Metadata(
@@ -76,7 +75,8 @@ class MetadataPlugin(_base.PluginBase):
 
         post_data = {
             "plugins": plugins,
-            "metadata": metadata
+            "metadata": metadata,
+            "origin": self._NAME
         }
 
         metadata_attributes:dict[str, list[function, list[Any]]] = {
@@ -94,7 +94,6 @@ class MetadataPlugin(_base.PluginBase):
             "deleted": [self.get_deleted, [metadata]],
             "post_url": [self.get_post_url, [metadata]],
             "pools": [self.get_pools, [metadata]],
-            "local_file": [self._get_media_file, [metadata_file]]
         }
 
         for key, attributes in metadata_attributes.items():
@@ -109,13 +108,6 @@ class MetadataPlugin(_base.PluginBase):
         )
         
         return post
-
-    def _get_media_file(self, metadata_file:Path) -> Path | None:
-        media_file = metadata_file.parent / metadata_file.stem
-        if media_file.exists():
-            logger.debug(f"Found '{media_file}' media file")
-            return media_file
-        return None
 
 class ValidationPlugin(_base.PluginBase):
     POST_URL_PATTERN:re.Pattern = None

@@ -24,7 +24,7 @@ class SharedAttributes:
             return f"{self.URL_BASE}/posts"
         return ""
 
-class PluginBase(SharedAttributes, metaclass=constants.Singleton):
+class PluginBase(SharedAttributes): # , metaclass=constants.Singleton
     def __init__(self):
         logger.debug(f"Loaded {self.__class__.__name__}")
 

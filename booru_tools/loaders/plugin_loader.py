@@ -121,8 +121,7 @@ class PluginLoader:
             try:
                 plugin_category = plugin.obj._CATEGORY
                 logger.debug(f"Category search: '{category}' in '{plugin_category}'")
-                plugin_category_matches = any(category in plugin_category for plugin_category in plugin_category)
-                if plugin_category_matches:
+                if category in plugin_category:
                     logger.debug(f"Found '{plugin}' with category match")
                     return plugin
             except (TypeError, AttributeError):

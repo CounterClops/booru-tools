@@ -73,7 +73,6 @@ class SessionManager:
         self.load_cookies(cookies)
         return cookies
 
-
 class BooruTools:
     def __init__(self, booru_plugin_directory:Path="", config:dict=defaultdict(dict), tmp_path:str="tmp"):
         if not booru_plugin_directory:
@@ -186,54 +185,6 @@ class BooruTools:
                     )
                     tasks.append(task)
             results = [task.result() for task in tasks]
-
-    def create_post_from_metadata(self, metadata:resources.Metadata, download_link:str) -> resources.InternalPost:
-        try:
-            file_url:str = metadata["file"]["url"]
-            domain:str = urlparse(file_url).hostname
-        except KeyError:
-            domain:str = urlparse(download_link).hostname
-
-        try:
-            post_category:str = metadata["category"]
-        except KeyError:
-            post_category:str = ""
-        
-        metadata_plugin:_plugin_template.MetadataPlugin = self.metadata_loader.load_matching_plugin(domain=domain, category=post_category)
-        api_plugin:_plugin_template.ApiPlugin = self.api_loader.load_matching_plugin(domain=domain, category=post_category)
-        validator_plugins:list[_plugin_template.ValidationPlugin] = self.validation_loader.load_all_plugins()
-
-        plugins = resources.InternalPlugins(
-            api=api_plugin,
-            meta=metadata_plugin,
-            validators=validator_plugins
-        )
-        
-        post = metadata_plugin.from_metadata_file(metadata_file=metadata.file, plugins=plugins)
-        
-        return post
-
-    def import_metadata_files(self, download_directory:Path, metadata_file_extension:str="json") -> list[resources.Metadata]:
-        """Imports the metadata from the provided metadata files
-
-        Args:
-            download_directory (Path): The path the metadata files are downloaded to
-            metadata_file_extension (str, optional): The file extension of the metadata files. Defaults to "json".
-
-        Returns:
-            metadata_list (list[resources.Metadata]): The list of metadata that was pulled from each file
-        """
-        metadata_list:list[resources.Metadata] = []
-
-        for json_file in download_directory.rglob(f"*.{metadata_file_extension}"):
-            with open(json_file) as file:
-                metadata = resources.Metadata(
-                    data=json.load(file),
-                    file=json_file.absolute()
-                )
-                metadata_list.append(metadata)
-
-        return metadata_list
     
     def cleanup_process_directories(self) -> None:
         """Cleans up the temporary directories

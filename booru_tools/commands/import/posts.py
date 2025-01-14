@@ -1,6 +1,7 @@
-import click
 from loguru import logger
 from pathlib import Path
+from urllib.parse import urlparse
+import click
 import asyncio
 import traceback
 
@@ -78,17 +79,23 @@ class ImportPostsCommand():
 
     async def run(self, *args, **kwargs):
         await self.post_init(*args, **kwargs)
+        processed_posts = []
 
         for url in self.urls:
-            try:
-                await self._import_posts_from_url(url)
-            except Exception as e:
-                logger.critical(f"url import failed with {e}")
-                logger.critical(traceback.format_exc())
+            async for job in self.download_posts_from_url(url):
+                posts = [item.resource for item in job.download_items if item.ignore == False]
+                try:
+                    processed_posts.extend([post.id for post in posts])
+                    await self.booru_tools.update_posts(posts=posts)
+                except Exception as e:
+                    logger.critical(f"url import failed with {e}")
+                    logger.critical(traceback.format_exc())
+                finally:
+                    job.cleanup_folders()
 
-            # filtered_tags = self._filter_tags(tags=self.all_tags)
-            # await self.booru_tools.update_tags(tags=filtered_tags)
-            # self.all_tags = []
+        # filtered_tags = self._filter_tags(tags=self.all_tags)
+        # await self.booru_tools.update_tags(tags=filtered_tags)
+        # self.all_tags = []
         
         self.booru_tools.cleanup_process_directories()
         await self.booru_tools.session_manager.close()
@@ -98,28 +105,57 @@ class ImportPostsCommand():
         logger.debug(f"Filtered out tags in default category, going from {len(tags)} tags to {len(filtered_tags)} tags")
         return filtered_tags
 
-    async def _import_posts_from_url(self, url:str):
-        self.gallery_dl = GalleryDl(
-            tmp_path=self.booru_tools.tmp_directory,
-            urls=[url]
-        )
+    def check_for_allowed_post(self, post:resources.InternalPost):
+        if not self.check_post_allowed(post=post):
+            logger.info(f"Skipping '{post.id}' as it is not allowed with current config")
+            return False
+        return True
 
-        metadata_downloader = self.gallery_dl.create_bulk_downloader(
-            only_metadata=True,
-            download_count=self.download_page_size
-        )
-        
-        for download_folder in metadata_downloader:
-            source_posts = await self._ingest_folder(folder=download_folder)
-            posts = await self._download_imported_posts(posts=source_posts, folder=download_folder)
-            try:
-                await self.booru_tools.update_posts(posts=posts)
-            except TypeError as e:
-                logger.warning(f"Error updating posts due to {e}")
-            self.booru_tools.delete_directory(directory=download_folder)
-            if self._check_download_limit_reached():
-                break
-    
+    async def download_posts_from_url(self, url:str):
+        domain:str = urlparse(url).hostname
+
+        meta_plugin:_plugin_template.MetadataPlugin = self.booru_tools.metadata_loader.load_matching_plugin(domain=domain)
+        api_plugin:_plugin_template.ApiPlugin = self.booru_tools.api_loader.load_matching_plugin(domain=domain)
+        validator_plugins:list[_plugin_template.ValidationPlugin] = self.booru_tools.validation_loader.load_all_plugins()
+
+        for job in meta_plugin.DOWNLOAD_MANAGER.download(url=url):
+            for item in job.download_items:
+                plugins = resources.InternalPlugins(
+                    api=api_plugin,
+                    meta=meta_plugin,
+                    validators=validator_plugins
+                )
+                metadata_file = item.metadata_file
+                post = meta_plugin.from_metadata_file(metadata_file=metadata_file, plugins=plugins)
+
+                item.resource = post
+
+                if not self.check_for_allowed_post(post=post):
+                    logger.debug(f"Marking post '{post.id}' as something to be ignored")
+                    item.ignore = True
+                    continue
+
+                for tag in post.tags:
+                    if tag in self.all_tags:
+                        continue
+                    self.all_tags.append(tag)
+            
+            posts = [item.resource for item in job.download_items if item.ignore == False]
+            existing_post_tasks = await self._check_for_existing_posts(posts=posts)
+            
+            for item in job.download_items:
+                if item.ignore:
+                    continue
+
+                existing_post:resources.InternalPost = existing_post_tasks[item.resource.id].result()
+                if existing_post:
+                    post:resources.InternalPost = existing_post.merge_resource(update_object=post, deep_copy=False)
+                else:
+                    item.media_download_desired = True
+
+            job.download_media()
+            yield job
+
     def check_post_allowed(self, post:resources.InternalPost):
         if post.contains_any_tags(tags=self.blacklisted_tags):
             logger.debug(f"Post '{post.id}' contains blacklisted tags from {self.blacklisted_tags}")
@@ -139,51 +175,6 @@ class ImportPostsCommand():
         logger.debug(f"Post '{post.id}' passed all checks")
         return True
 
-    async def _ingest_folder(self, folder:Path) -> list[resources.InternalPost]:
-        metadata_list = self.booru_tools.import_metadata_files(download_directory=folder)
-        logger.debug(f"Reviewing the metadata of {len(metadata_list)} files")
-
-        metadata_posts = []
-        for metadata in metadata_list:
-            post:resources.InternalPost = self.booru_tools.create_post_from_metadata(metadata=metadata, download_link="")
-            if not self.check_post_allowed(post=post):
-                logger.info(f"Skipping '{post.id}' as it is not allowed with current config")
-                continue
-            metadata_posts.append(post)
-        
-        return metadata_posts
-    
-    async def _download_imported_posts(self, posts:list[resources.InternalPost], folder:Path) -> list[resources.InternalPost]:
-        posts_to_download:list[resources.InternalPost] = []
-        all_posts:list[resources.InternalPost] = []
-
-        existing_post_tasks = await self._check_for_existing_posts(posts=posts)
-        for post in posts:
-            existing_post:resources.InternalPost = existing_post_tasks[post.id].result()
-
-            if not existing_post:
-                logger.info(f"Queuing up '{post.post_url}' for download")
-                posts_to_download.append(post)
-            else:
-                post:resources.InternalPost = existing_post.merge_resource(update_object=post, deep_copy=False)
-                all_posts.append(post)
-
-            # Process tag category data
-            for tag in post.tags:
-                if tag in self.all_tags:
-                    continue
-                self.all_tags.append(tag)
-
-        if posts_to_download:
-            downloaded_posts = self._download_post_files(posts_to_download=posts_to_download, folder=folder)
-            all_posts.extend(downloaded_posts)
-            self.blank_download_page_count = 0
-        else:
-            logger.info("No new posts to download")
-            self.blank_download_page_count += 1
-        
-        return all_posts
-
     async def _check_for_existing_posts(self, posts:list[resources.InternalPost]) -> dict[int, asyncio.Task]:
         existing_posts:dict[int, asyncio.Task] = {}
         async with asyncio.TaskGroup() as task_group:
@@ -193,26 +184,6 @@ class ImportPostsCommand():
                 )
                 existing_posts[post.id] = task
         return existing_posts
-
-    def _download_post_files(self, posts_to_download:list[resources.InternalPost], folder:Path) -> list[resources.InternalPost]:
-        logger.info(f"Downloading {len(posts_to_download)} posts")
-        post_urls = [post.post_url for post in posts_to_download]
-        self.gallery_dl.download_urls(urls=post_urls, download_folder=folder)
-
-        downloaded_posts:list[resources.InternalPost] = []
-        for post in posts_to_download:
-            post.local_file = self.booru_tools.get_media_file(metadata=post.metadata)
-            downloaded_posts.append(post)
-        
-        return downloaded_posts
-    
-    def _check_download_limit_reached(self) -> bool:      
-        page_count_past_limit = self.blank_download_page_count >= self.allowed_blank_pages
-        download_page_limit_enabled = self.allowed_blank_pages != 0
-        if page_count_past_limit and download_page_limit_enabled:
-            logger.info(f"Reached the maximum number of blank pages ({self.allowed_blank_pages}), stopping")
-            return True
-        return False
 
 @click.command()
 @click.option('--url', multiple=True, help='URL to import from')
