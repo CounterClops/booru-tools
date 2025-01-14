@@ -8,8 +8,6 @@ import traceback
 from booru_tools import core
 from booru_tools.shared import resources, constants
 from booru_tools.plugins import _plugin_template
-from booru_tools.tools.gallery_dl import GalleryDl
-
 
 class ImportPostsCommand():
     def __init__(self):
