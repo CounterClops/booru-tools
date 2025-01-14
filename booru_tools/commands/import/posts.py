@@ -126,7 +126,7 @@ class ImportPostsCommand():
                     validators=validator_plugins
                 )
                 metadata_file = item.metadata_file
-                post = meta_plugin.from_metadata_file(metadata_file=metadata_file, plugins=plugins)
+                post = meta_plugin._from_metadata_file(metadata_file=metadata_file, plugins=plugins)
 
                 item.resource = post
 

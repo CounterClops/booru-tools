@@ -33,10 +33,10 @@ class MetadataPlugin(_base.PluginBase):
     def get_tags(self, metadata:dict) -> list[resources.InternalTag]:
         raise NotImplementedError
 
-    def get_created_at(self, metadata:dict) -> datetime | None:
+    def get_created_at(self, metadata:dict) -> datetime:
         raise NotImplementedError
 
-    def get_updated_at(self, metadata:dict) -> datetime | None:
+    def get_updated_at(self, metadata:dict) -> datetime:
         raise NotImplementedError
 
     def get_relations(self, metadata:dict) -> resources.InternalRelationship:
@@ -60,12 +60,17 @@ class MetadataPlugin(_base.PluginBase):
     def get_deleted(self, metadata:dict) -> bool:
         raise NotImplementedError
 
-    def from_metadata_file(self, metadata_file:Path, plugins:resources.InternalPlugins=None) -> resources.InternalPost:
+    def _load_metadata_file_data(self, metadata_file:Path) -> dict:
         with open(metadata_file) as file:
-            metadata = resources.Metadata(
-                data=json.load(file),
-                file=metadata_file.absolute()
-            )
+            data = json.load(file)
+        return data
+    
+    def _from_metadata_file(self, metadata_file:Path, plugins:resources.InternalPlugins=None) -> resources.InternalPost:
+        data = self._load_metadata_file_data(metadata_file)
+        metadata = resources.Metadata(
+            data=data,
+            file=metadata_file.absolute()
+        )
         
         if not plugins:
             plugins = resources.InternalPlugins(
