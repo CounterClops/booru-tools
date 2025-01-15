@@ -206,13 +206,6 @@ class BooruTools:
         logger.debug(f"Deleting '{directory}' folder")
         shutil.rmtree(directory)
     
-    def get_media_file(self, metadata:resources.Metadata) -> Path | None:
-        media_file = metadata.file.parent / metadata.file.stem
-        if media_file.exists():
-            logger.debug(f"Found '{media_file}' media file")
-            return media_file
-        return None
-    
     def add_missing_post_hashes(self, post:resources.InternalPost) -> resources.InternalPost:
         file_md5 = self.get_md5_hash(file_path=post.local_file)
         file_sha1 = self.get_sha1_hash(file_path=post.local_file)
