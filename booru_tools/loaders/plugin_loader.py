@@ -8,7 +8,7 @@ import aiohttp
 from dataclasses import dataclass
 from loguru import logger
 from booru_tools.plugins import _base
-from booru_tools.shared import errors
+from booru_tools.shared import errors, config
 
 @dataclass(kw_only=True)
 class InternalPlugin:
@@ -35,13 +35,8 @@ class PluginLoader:
     def __init__(self, plugin_class: _base.PluginBase, session: aiohttp.ClientSession = None):
         self.plugins:list[InternalPlugin] = []
         self.plugin_class:_base.PluginBase = plugin_class
-        self.plugin_configs:dict[str, dict] = {
-            "szurubooru" : {
-                "url_base": "https://szurubooru.equus.soy",
-                "username": "e621-sync",
-                "password": "7dc645f5-b525-43b0-a27b-3362d5e8bb2f"
-            }
-        }
+        config_instance = config.Config()
+        self.plugin_configs:dict[str, dict] = config_instance.plugins
         self.session = session
 
     # Function to load all plugins (Python files) in a directory
