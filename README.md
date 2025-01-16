@@ -1,1 +1,1 @@
-# szurubooru-tools
+# booru-tools
