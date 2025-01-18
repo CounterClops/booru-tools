@@ -27,8 +27,6 @@ class GalleryDlManager(_base.DownloadManager):
         return None
     
     def download_info(self, urls:list[str], download_directory:Path) -> list[_base.DownloadItem]:
-        urls = [self.add_extractor_to_url(url) for url in urls]
-        
         params = [
             "--write-metadata", 
             "--no-download",
@@ -117,11 +115,9 @@ class GalleryDlManager(_base.DownloadManager):
             range = f"{min_range}-{max_range}"
 
             params = [
-                "--write-metadata", 
-                "--no-download", 
                 f"--range={range}",
                 *self.extra_params,
-                url
+                self.add_extractor_to_url(url)
             ]
 
             job = self.create_download_job(params)
