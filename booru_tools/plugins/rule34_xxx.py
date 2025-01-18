@@ -2,6 +2,7 @@ import re
 
 from booru_tools.plugins import _plugin_template, gelbooru
 from booru_tools.shared import constants
+from booru_tools.downloaders import gallerydl
 
 class SharedAttributes:
     _DOMAINS = [
@@ -17,12 +18,10 @@ class SharedAttributes:
     @property
     def DEFAULT_POST_SEARCH_URL(self):
         return f"{self.URL_BASE}/index.php?page=dapi&s=post&q=index"
-    
-    POST_CATEGORY_MAP = {}
 
-    DOWNLOADER_CONFIG = {
-        "extractor": "gelbooru_v02"
-    }
+    DOWNLOAD_MANAGER = gallerydl.GalleryDlManager(
+        extractor="gelbooru_v02"
+    )
 
 class Rule34XxxMeta(SharedAttributes, gelbooru.GelbooruMeta):
     pass
