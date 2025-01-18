@@ -162,7 +162,7 @@ class ImportPostsCommand():
             logger.debug(f"Post '{post.id}' does not contain all required tags from {self.required_tags}")
             return False
         if self.allowed_safety and (post.safety not in self.allowed_safety):
-            logger.debug(f"Post '{post.id}' is not in the allowed safety selection from {self.allowed_safety}")
+            logger.debug(f"Post '{post.id}' with '{post.safety}' is not in the allowed safety selection from {self.allowed_safety}")
             return False
         if self.minimum_score and post.score < self.minimum_score:
             logger.debug(f"Post '{post.id}' has a score of {post.score} which is below the minimum score of {self.minimum_score}")
