@@ -81,10 +81,10 @@ class BooruTools:
         else:
             self.booru_plugin_directory = Path(booru_plugin_directory)
         
-        self.config = config.Config().core
+        self.config = config.ConfigManager()
         self.tmp_directory = constants.TEMP_FOLDER
         self.session_manager = SessionManager(
-            limit_per_host=self.config.get("limit_per_host", 20)
+            limit_per_host=self.config.networking.get("limit_per_host", 20)
         )
 
         signal.signal(signal.SIGINT, self.raise_graceful_exit)
@@ -133,8 +133,9 @@ class BooruTools:
         )
         self.validation_loader.import_plugins_from_directory(directory=self.booru_plugin_directory)
 
-        if self.config["destination"]:
-            self.destination_plugin:_plugin_template.ApiPlugin = self.api_loader.load_matching_plugin(domain=self.config["destination"], category=self.config["destination"])
+        destination = self.config.core["destination"]
+        if destination:
+            self.destination_plugin:_plugin_template.ApiPlugin = self.api_loader.load_matching_plugin(domain=destination, category=destination)
     
     async def find_exact_post(self, post:resources.InternalPost) -> resources.InternalPost | None:
         logger.info(f"Getting exact post for '{post.id}'")
@@ -171,19 +172,19 @@ class BooruTools:
         results = [task.result() for task in tasks]
 
     def check_post_allowed(self, post:resources.InternalPost):
-        blacklisted_tags = self.config["blacklisted_tags"]
+        blacklisted_tags = self.config.core["blacklisted_tags"]
         if post.contains_any_tags(tags=blacklisted_tags):
             logger.debug(f"Post '{post.id}' contains blacklisted tags from {blacklisted_tags}")
             return False
-        required_tags = self.config["required_tags"]
+        required_tags = self.config.core["required_tags"]
         if not post.contains_all_tags(tags=required_tags):
             logger.debug(f"Post '{post.id}' does not contain all required tags from {required_tags}")
             return False
-        allowed_safety = self.config["allowed_safety"]
+        allowed_safety = self.config.core["allowed_safety"]
         if allowed_safety and (post.safety not in allowed_safety):
             logger.debug(f"Post '{post.id}' with '{post.safety}' is not in the allowed safety selection from {allowed_safety}")
             return False
-        minimum_score = self.config["minimum_score"]
+        minimum_score = self.config.core["minimum_score"]
         if minimum_score and post.score < minimum_score:
             logger.debug(f"Post '{post.id}' has a score of {post.score} which is below the minimum score of {minimum_score}")
             return False

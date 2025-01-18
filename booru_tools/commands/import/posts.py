@@ -58,12 +58,6 @@ class ImportPostsCommand():
         self.download_page_size = download_page_size
         self.minimum_score = minimum_score
 
-        self.allowed_safety = []
-        # for safety in allowed_safety.split(","):
-        #     standard_safety = constants.Safety.get_matching_safety(safety=safety, return_default=False)
-        #     if standard_safety:
-        #         self.allowed_safety.append(standard_safety)
-
     async def run(self, *args, **kwargs):
         await self.post_init(*args, **kwargs)
         processed_posts = []

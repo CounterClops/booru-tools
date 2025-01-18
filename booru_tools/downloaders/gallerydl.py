@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 
 from booru_tools.downloaders import _base
-from booru_tools.shared import constants
+from booru_tools.shared import constants, config
 
 class GalleryDlManager(_base.DownloadManager):
     def __init__(self, extractor:str=None, page_size:int=50, extra_params:list=[]):
