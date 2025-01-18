@@ -12,15 +12,15 @@ import signal
 
 from booru_tools.loaders import plugin_loader
 from booru_tools.plugins import _plugin_template
-from booru_tools.shared import errors, resources, constants
+from booru_tools.shared import errors, resources, constants, config
 
 class GracefulExit(SystemExit):
     code = 1
 
 class SessionManager:
-    def __init__(self):
+    def __init__(self, limit_per_host:int=20):
         self.session = None
-        self.limit_per_host = 20
+        self.limit_per_host = limit_per_host
         self.default_headers = {
             "User-Agent": "BooruTools/1.0"
         }
@@ -74,16 +74,18 @@ class SessionManager:
         return cookies
 
 class BooruTools:
-    def __init__(self, booru_plugin_directory:Path="", config:dict=defaultdict(dict), tmp_path:str="tmp"):
+    def __init__(self, booru_plugin_directory:Path="", tmp_path:str="tmp"):
         if not booru_plugin_directory:
             program_path = constants.ROOT_FOLDER
             self.booru_plugin_directory = program_path / Path("plugins")
         else:
             self.booru_plugin_directory = Path(booru_plugin_directory)
         
+        self.config = config.Config().core
         self.tmp_directory = constants.TEMP_FOLDER
-        self.config = config
-        self.session_manager = SessionManager()
+        self.session_manager = SessionManager(
+            limit_per_host=self.config.get("limit_per_host", 20)
+        )
 
         signal.signal(signal.SIGINT, self.raise_graceful_exit)
         signal.signal(signal.SIGTERM, self.raise_graceful_exit)
@@ -167,6 +169,29 @@ class BooruTools:
                 )
                 tasks.append(task)
         results = [task.result() for task in tasks]
+
+    def check_post_allowed(self, post:resources.InternalPost):
+        blacklisted_tags = self.config["blacklisted_tags"]
+        if post.contains_any_tags(tags=blacklisted_tags):
+            logger.debug(f"Post '{post.id}' contains blacklisted tags from {blacklisted_tags}")
+            return False
+        required_tags = self.config["required_tags"]
+        if not post.contains_all_tags(tags=required_tags):
+            logger.debug(f"Post '{post.id}' does not contain all required tags from {required_tags}")
+            return False
+        allowed_safety = self.config["allowed_safety"]
+        if allowed_safety and (post.safety not in allowed_safety):
+            logger.debug(f"Post '{post.id}' with '{post.safety}' is not in the allowed safety selection from {allowed_safety}")
+            return False
+        minimum_score = self.config["minimum_score"]
+        if minimum_score and post.score < minimum_score:
+            logger.debug(f"Post '{post.id}' has a score of {post.score} which is below the minimum score of {minimum_score}")
+            return False
+        if post.deleted:
+            logger.debug(f"Post '{post.id}' is marked as deleted")
+            return False
+        logger.debug(f"Post '{post.id}' passed all checks")
+        return True
 
     async def update_tags(self, tags:list[resources.InternalTag]):
         logger.info(f"Updating {len(tags)} tags")
