@@ -8,9 +8,19 @@ from booru_tools.shared import constants, config
 
 class GalleryDlManager(_base.DownloadManager):
     def __init__(self, extractor:str=None, page_size:int=50, extra_params:list=[]):
+        logger.debug(f"Loading {self.__class__.__name__}")
         self.extractor:str = extractor
         self.page_size:int = page_size
         self.extra_params:list = extra_params
+
+        config_manager = config.ConfigManager()
+        cookies_file = config_manager['networking']['cookies_file']
+        if cookies_file:
+            logger.debug(f"Using cookies file '{cookies_file}'")
+            self.extra_params.extend([
+                "--cookies",
+                f"{cookies_file}"
+            ])
     
     def add_extractor_to_url(self, url:str) -> str:
         if self.extractor and not url.startswith(self.extractor):
@@ -19,7 +29,8 @@ class GalleryDlManager(_base.DownloadManager):
 
     def call_gallerydl(self, params:list = []) -> None:
         command = [
-            "gallery-dl", 
+            "gallery-dl",
+            *self.extra_params,
             *params
         ]
 
@@ -31,7 +42,6 @@ class GalleryDlManager(_base.DownloadManager):
             "--write-metadata", 
             "--no-download",
             f"-D={download_directory}",
-            *self.extra_params,
             *urls
         ]
 
@@ -116,7 +126,6 @@ class GalleryDlManager(_base.DownloadManager):
 
             params = [
                 f"--range={range}",
-                *self.extra_params,
                 self.add_extractor_to_url(url)
             ]
 

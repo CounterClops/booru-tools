@@ -35,8 +35,8 @@ class PluginLoader:
     def __init__(self, plugin_class: _base.PluginBase, session: aiohttp.ClientSession = None):
         self.plugins:list[InternalPlugin] = []
         self.plugin_class:_base.PluginBase = plugin_class
-        config_instance = config.Config()
-        self.plugin_configs:dict[str, dict] = config_instance.plugins
+        config_instance = config.ConfigManager()
+        self.plugin_configs:dict[str, dict] = config_instance["plugins"]
         self.session = session
 
     # Function to load all plugins (Python files) in a directory

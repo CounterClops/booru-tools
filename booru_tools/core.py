@@ -47,6 +47,7 @@ class SessionManager:
         self.cookies = cookies
 
         if not self.session.closed:
+            logger.debug(f"Updating session cookies with {len(cookies)} cookies")
             self.session.cookie_jar.update_cookies(cookies)
     
     def load_cookie_file(self, cookie_file:Path) -> dict:
@@ -58,13 +59,13 @@ class SessionManager:
         cookie_file = Path(cookie_file)
 
         if cookie_file.suffix == ".txt":
-            # Load cookies from cookies.txt
+            logger.debug(f"Loading cookies from '{cookie_file}' with MozillaCookieJar")
             cookie_jar = MozillaCookieJar()
             cookie_jar.load(cookie_file, ignore_discard=True, ignore_expires=True)
             for cookie in cookie_jar:
                 cookies[cookie.name] = cookie.value
         elif cookie_file.suffix == ".json":
-            # Load cookies from cookies.json
+            logger.debug(f"Loading cookies from '{cookie_file}' with json")
             with open(cookie_file, "r") as f:
                 cookies = json.load(f)
         else:
@@ -84,7 +85,7 @@ class BooruTools:
         self.config = config.ConfigManager()
         self.tmp_directory = constants.TEMP_FOLDER
         self.session_manager = SessionManager(
-            limit_per_host=self.config.networking.get("limit_per_host", 20)
+            limit_per_host=self.config["networking"].get("limit_per_host", 20)
         )
 
         signal.signal(signal.SIGINT, self.raise_graceful_exit)
@@ -92,6 +93,12 @@ class BooruTools:
 
         try:
             self.session_manager.start()
+            cookie_file = self.config["networking"]["cookies_file"]
+            if cookie_file:
+                logger.debug(f"Attempting to load cookies from '{cookie_file}'")
+                self.session_manager.load_cookie_file(
+                    cookie_file=cookie_file
+                )
         except RuntimeError as e:
             logger.debug(f"Error starting session due to {e}")
         self.load_plugins()
@@ -133,7 +140,7 @@ class BooruTools:
         )
         self.validation_loader.import_plugins_from_directory(directory=self.booru_plugin_directory)
 
-        destination = self.config.core["destination"]
+        destination = self.config["core"]["destination"]
         if destination:
             self.destination_plugin:_plugin_template.ApiPlugin = self.api_loader.load_matching_plugin(domain=destination, category=destination)
     
@@ -172,19 +179,19 @@ class BooruTools:
         results = [task.result() for task in tasks]
 
     def check_post_allowed(self, post:resources.InternalPost):
-        blacklisted_tags = self.config.core["blacklisted_tags"]
+        blacklisted_tags = self.config["core"]["blacklisted_tags"]
         if post.contains_any_tags(tags=blacklisted_tags):
             logger.debug(f"Post '{post.id}' contains blacklisted tags from {blacklisted_tags}")
             return False
-        required_tags = self.config.core["required_tags"]
+        required_tags = self.config["core"]["required_tags"]
         if not post.contains_all_tags(tags=required_tags):
             logger.debug(f"Post '{post.id}' does not contain all required tags from {required_tags}")
             return False
-        allowed_safety = self.config.core["allowed_safety"]
+        allowed_safety = self.config["core"]["allowed_safety"]
         if allowed_safety and (post.safety not in allowed_safety):
             logger.debug(f"Post '{post.id}' with '{post.safety}' is not in the allowed safety selection from {allowed_safety}")
             return False
-        minimum_score = self.config.core["minimum_score"]
+        minimum_score = self.config["core"]["minimum_score"]
         if minimum_score and post.score < minimum_score:
             logger.debug(f"Post '{post.id}' has a score of {post.score} which is below the minimum score of {minimum_score}")
             return False
