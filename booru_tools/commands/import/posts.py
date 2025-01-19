@@ -29,19 +29,8 @@ class ImportPostsCommand():
                 allowed_safety:str="",
                 minimum_score:int=0
             ):
-        booru_config = {
-            "destination": destination
-        }
         
-        self.booru_tools = core.BooruTools(
-            config=booru_config
-        )
-
-        if plugin_override:
-            self.booru_tools.override_plugin_config(
-                plugin=self.booru_tools.destination_plugin,
-                plugin_override=plugin_override
-            )
+        self.booru_tools = core.BooruTools()
         
         self.urls = url
         if import_site:
@@ -68,12 +57,6 @@ class ImportPostsCommand():
         self.allowed_blank_pages = allowed_blank_pages
         self.download_page_size = download_page_size
         self.minimum_score = minimum_score
-
-        self.allowed_safety = []
-        for safety in allowed_safety.split(","):
-            standard_safety = constants.Safety.get_matching_safety(safety=safety, return_default=False)
-            if standard_safety:
-                self.allowed_safety.append(standard_safety)
 
     async def run(self, *args, **kwargs):
         await self.post_init(*args, **kwargs)
@@ -104,7 +87,7 @@ class ImportPostsCommand():
         return filtered_tags
 
     def check_for_allowed_post(self, post:resources.InternalPost):
-        if not self.check_post_allowed(post=post):
+        if not self.booru_tools.check_post_allowed(post=post):
             logger.info(f"Skipping '{post.id}' as it is not allowed with current config")
             return False
         return True
@@ -153,25 +136,6 @@ class ImportPostsCommand():
 
             job.download_media()
             yield job
-
-    def check_post_allowed(self, post:resources.InternalPost):
-        if post.contains_any_tags(tags=self.blacklisted_tags):
-            logger.debug(f"Post '{post.id}' contains blacklisted tags from {self.blacklisted_tags}")
-            return False
-        if not post.contains_all_tags(tags=self.required_tags):
-            logger.debug(f"Post '{post.id}' does not contain all required tags from {self.required_tags}")
-            return False
-        if self.allowed_safety and (post.safety not in self.allowed_safety):
-            logger.debug(f"Post '{post.id}' is not in the allowed safety selection from {self.allowed_safety}")
-            return False
-        if self.minimum_score and post.score < self.minimum_score:
-            logger.debug(f"Post '{post.id}' has a score of {post.score} which is below the minimum score of {self.minimum_score}")
-            return False
-        if post.deleted:
-            logger.debug(f"Post '{post.id}' is marked as deleted")
-            return False
-        logger.debug(f"Post '{post.id}' passed all checks")
-        return True
 
     async def _check_for_existing_posts(self, posts:list[resources.InternalPost]) -> dict[int, asyncio.Task]:
         existing_posts:dict[int, asyncio.Task] = {}

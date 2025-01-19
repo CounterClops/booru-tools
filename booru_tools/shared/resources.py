@@ -24,9 +24,9 @@ class UniqueList(list):
 
 @dataclass(kw_only=True)
 class InternalPlugins:
-    api: PluginBase = None # This is the api plugin
-    meta: PluginBase = None # This is the metadata plugin
-    validators: list[PluginBase] = field(default_factory=list)
+    api:PluginBase = field(default=None) # This is the API plugin
+    meta:PluginBase = field(default=None) # This is the metadata plugin
+    validators:list[PluginBase] = field(default_factory=list)
 
     def find_matching_validator(self, domain:str) -> PluginBase|None:
         for validator_plugin in self.validators:
@@ -40,10 +40,10 @@ class InternalPlugins:
 
 @dataclass(kw_only=True)
 class Metadata:
-    data: dict = field(default_factory=dict) # This is the raw metadata dict
-    file: Path = None # This is the path to the metadata file the metadata was pulled from
+    data:dict = field(default_factory=dict) # This is the raw metadata dict
+    file:Path = None # This is the path to the metadata file the metadata was pulled from
 
-    def __getitem__(self, key: str) -> Any:
+    def __getitem__(self, key:str) -> Any:
         return self.data[key]
     
     def get(self, key:Any, default:Any=None):
@@ -53,7 +53,7 @@ class Metadata:
         return self.data.items(*args, **kwargs)
     
     @classmethod
-    def from_dict(cls, data: dict) -> "Metadata":
+    def from_dict(cls, data:dict) -> "Metadata":
         return cls(data=data)
 
 def default_extra():
@@ -61,14 +61,14 @@ def default_extra():
 
 @dataclass(kw_only=True)
 class InternalResource:
-    origin: str = None # This is the origin field of where this resource was pulled from, what source site/plugin was this created from?
-    plugins: InternalPlugins = field(default_factory=InternalPlugins) # The plugins object containing the appropriate metadata/api plugins
-    metadata: Metadata = field(default_factory=Metadata) # The metadata object containing the raw metadata and file location
-    deleted: bool = False
-    _extra: defaultdict = field(default_factory=default_extra) # This is for any extra plugin specific data that the plugin may need to retain for future actions, but doesn't fit into a regular Resource
+    origin:str = field(default="") # This is the origin field of where this resource was pulled from, what source site/plugin was this created from?
+    plugins:InternalPlugins = field(repr=False, default_factory=InternalPlugins) # The plugins object containing the appropriate metadata/api plugins
+    metadata:Metadata = field(repr=False, default_factory=Metadata) # The metadata object containing the raw metadata and file location
+    deleted:bool = field(default=False) # This is a flag to mark the resource as deleted
+    _extra:defaultdict = field(default_factory=default_extra) # This is for any extra plugin specific data that the plugin may need to retain for future actions, but doesn't fit into a regular Resource
 
     @classmethod
-    def from_dict(cls, data: dict) -> "InternalResource":
+    def from_dict(cls, data:dict) -> "InternalResource":
         return cls(**data)
     
     @classmethod
@@ -142,9 +142,9 @@ class InternalResource:
 
 @dataclass(kw_only=True)
 class InternalTag(InternalResource):
-    names: list[str] # The list of names for this tag
-    category: str = constants.TagCategory._DEFAULT # The tag category string
-    implications: list["InternalTag"] = field(default_factory=list) # A list of all tags this specific tag implies.
+    names:list[str] # The list of names for this tag
+    category:str = field(default=constants.TagCategory._DEFAULT) # The tag category string
+    implications:list["InternalTag"] = field(default_factory=list) # A list of all tags this specific tag implies.
 
     def __eq__(self, other):
         if isinstance(other, InternalTag):
@@ -169,7 +169,7 @@ class InternalTag(InternalResource):
         return list(tag_strings)
     
     @classmethod
-    def from_dict(cls, data: dict) -> "InternalTag":
+    def from_dict(cls, data:dict) -> "InternalTag":
         data = cls.filter_valid_keys(data=data)
         if 'implications' in data and data['implications']:
             tag_implications:list[InternalResource] = []
@@ -186,8 +186,8 @@ class InternalTag(InternalResource):
 
 @dataclass(kw_only=True)
 class InternalRelationship:
-    parent_id: int = None
-    children: list[int] = field(default_factory=list)
+    parent_id:int = None
+    children:list[int] = field(default_factory=list)
 
     @property
     def related_post_ids(self) -> list[int]:
@@ -198,22 +198,21 @@ class InternalRelationship:
 
 @dataclass(kw_only=True)
 class InternalPost(InternalResource):
-    id: int
-    category: str = ""
-    description: str = ""
-    score: int = 0
-    tags: list[InternalTag] = field(default_factory=list)
-    sources: list[str] = field(default_factory=UniqueList)
-    _sources: UniqueList[str] = field(init=False, repr=False)
-    created_at: datetime = None
-    updated_at: datetime = None
-    relations: InternalRelationship = field(default_factory=InternalRelationship)
-    safety: str = constants.Safety._DEFAULT
-    sha1: str = ""
-    md5: str = ""
-    post_url: str = ""
-    pools: list["InternalPool"] = field(default_factory=list)
-    local_file: InitVar[Path] = None
+    id:int
+    description:str = field(default="")
+    score:int = field(default=0)
+    tags:list[InternalTag] = field(default_factory=list)
+    sources:list[str] = field(default_factory=UniqueList)
+    _sources:UniqueList[str] = field(init=False, repr=False)
+    created_at:datetime = field(default=None)
+    updated_at:datetime = field(default=None)
+    relations:InternalRelationship = field(default_factory=InternalRelationship)
+    safety:str = constants.Safety._DEFAULT
+    sha1:str = field(default="")
+    md5:str = field(default="")
+    post_url:str = field(default="")
+    pools:list["InternalPool"] = field(default_factory=list)
+    local_file:InitVar[Path] = field(default=None)
 
     def __eq__(self, other):
         if isinstance(other, InternalPost):
@@ -328,7 +327,7 @@ class InternalPost(InternalResource):
         return list(tag_strings)
     
     @classmethod
-    def from_dict(cls, data: dict) -> "InternalPost":
+    def from_dict(cls, data:dict) -> "InternalPost":
         data = cls.filter_valid_keys(data=data)
         if 'tags' in data and data['tags']:
             tags = []
@@ -354,13 +353,13 @@ class InternalPost(InternalResource):
 
 @dataclass(kw_only=True)
 class InternalPool(InternalResource):
-    id: int
-    names: list[str] = field(default_factory=list)
-    category: str = ""
-    description: str = ""
-    posts: list[InternalPost] = field(default_factory=list)
-    created_at: datetime = None
-    updated_at: datetime = None
+    id:int
+    names:list[str] = field(default_factory=list)
+    category:str = field(default="")
+    description:str = field(default="")
+    posts:list[InternalPost] = field(default_factory=list)
+    created_at:datetime = field(default=None)
+    updated_at:datetime = field(default=None)
 
     def __eq__(self, other):
         if isinstance(other, InternalPost):
@@ -372,7 +371,7 @@ class InternalPool(InternalResource):
         return NotImplementedError
 
     @classmethod
-    def from_dict(cls, data: dict) -> "InternalPool":
+    def from_dict(cls, data:dict) -> "InternalPool":
         data = cls.filter_valid_keys(data=data)
         if 'posts' in data and data['posts']:
             data['posts'] = [InternalPost.from_dict(post) for post in data['posts']]

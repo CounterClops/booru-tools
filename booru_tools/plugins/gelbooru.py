@@ -30,8 +30,11 @@ class SharedAttributes:
 
     POST_SAFETY_MAPPING = {
         "general": constants.Safety.SAFE,
+        "g": constants.Safety.SAFE,
         "sensitive": constants.Safety.SKETCHY,
-        "explicit": constants.Safety.UNSAFE
+        "s": constants.Safety.SKETCHY,
+        "explicit": constants.Safety.UNSAFE,
+        "e": constants.Safety.UNSAFE
     }
 
     REQUIRE_SOURCE_CHECK = True
@@ -46,12 +49,13 @@ class GelbooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
         return id
 
     def get_sources(self, metadata:dict) -> list[str]:
-        source:int = metadata.get("source", "")
+        source:str = metadata.get("source", "")
         post_url = self.get_post_url(metadata=metadata)
         if not source:
             sources:list = [post_url]
         else:
-            sources:list = [source, post_url]
+            sources:list = source.split(" ")
+            sources.append(post_url)
         return sources
     
     def get_score(self, metadata:dict) -> int:

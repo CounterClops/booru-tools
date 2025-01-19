@@ -1,0 +1,32 @@
+core:
+  blacklisted_tags:
+    - loli
+    - shota
+  required_tags: []
+  allowed_safety:
+    - safe
+    - unsafe
+  minimum_score: 10
+  destination: "szurubooru"
+
+commands:
+  import:
+    posts:
+      allowed_blank_pages: 1
+      download_page_size: 50
+
+downloaders:
+  gallery_dl:
+    page_size: 50
+
+networking:
+  connection_limit_per_host: 20
+  cookies_file: "cookies.txt"
+   
+plugins:
+  szurubooru:
+    username: "username"
+    password: "password"
+    URL_BASE: "https://localhost"
+    create_sql_fixes: True
+
