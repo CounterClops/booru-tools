@@ -18,7 +18,7 @@ class GracefulExit(SystemExit):
     code = 1
 
 class SessionManager:
-    def __init__(self, limit_per_host:int=20):
+    def __init__(self, limit_per_host:int=10):
         self.session = None
         self.limit_per_host = limit_per_host
         self.default_headers = {
