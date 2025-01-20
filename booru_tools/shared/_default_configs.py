@@ -43,7 +43,7 @@ class DefaultDownloadersConfig(DefaultConfigBaseGroup):
 ### Networking
 @dataclass(kw_only=True)
 class DefaultNetworkingConfig(DefaultConfigBaseGroup):
-    connection_limit_per_host:int = field(default=20)
+    connection_limit_per_host:int = field(default=5)
     cookies_file:Path = field(default=Path("cookies.txt"))
 
 ### Plugins
@@ -53,6 +53,7 @@ class DefaultPluginsSzurubooruConfig(DefaultConfigBaseGroup):
     password:str = field(default=None)
     URL_BASE:str = field(default=None)
     create_sql_fixes:bool = field(default=False)
+    force_source_check:bool = field(default=True)
 
 @dataclass(kw_only=True)
 class DefaultPluginsConfig(DefaultConfigBaseGroup):

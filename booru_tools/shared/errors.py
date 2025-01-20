@@ -21,6 +21,9 @@ class MissingFile(Exception):
 
 ### HTTP errors
 
+class ContentTooLarge(Exception):
+    pass
+
 class TooManyRequestsError(Exception):
     pass
 
@@ -34,6 +37,7 @@ class GatewayTimeout(Exception):
     pass
 
 HTTP_CODE_MAP = {
+    413: ContentTooLarge,
     429: TooManyRequestsError,
     500: InternalServerError,
     503: ServiceUnavailable,

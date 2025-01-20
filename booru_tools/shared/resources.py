@@ -107,6 +107,7 @@ class InternalResource:
                         if value in old_value:
                             continue
                         old_value.append(value)
+                    new_value = old_value
                 if isinstance(old_value, dict):
                     old_value.update(new_value)
 

@@ -632,9 +632,17 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         self.session = session
         self.image_distance_threshold = 0.10
         self.create_sql_fixes = False
-        self.enable_source_check = False
+        self.force_source_check = False
         self.rate_limiter = AsyncLimiter(
             max_rate=200,
+            time_period=60
+        )
+        self.medium_rate_limiter = AsyncLimiter(
+            max_rate=5,
+            time_period=20
+        )
+        self.heavy_rate_limiter = AsyncLimiter(
+            max_rate=1,
             time_period=60
         )
 
@@ -683,7 +691,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             except IndexError:
                 logger.debug(f"Post not found with sha1: {post.sha1}")
 
-        if self.enable_source_check or post.plugins.meta.REQUIRE_SOURCE_CHECK:
+        if self.force_source_check or post.plugins.meta.REQUIRE_SOURCE_CHECK:
             for source in post.sources_of_type(desired_source_type=constants.SourceTypes.POST):
                 search_query = f"source:{source}"
                 post_search = await self._post_search(
@@ -1280,16 +1288,11 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         logger.debug(f"Creating post with data={data}")
 
-        rate_limiter = AsyncLimiter(
-            max_rate=1,
-            time_period=1
-        )
-
         async with self.session.post(
                 url=url,
                 headers=self.headers,
                 json=data
-            ) as response, rate_limiter:
+            ) as response, self.medium_rate_limiter:
             try:
                 response.raise_for_status()
             except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
@@ -1418,14 +1421,17 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         """
         url = f"{self.URL_BASE}/api/uploads"
 
-        logger.debug(f"Uploading file '{file}' to temporary endpoint")
-
-        rate_limiter = AsyncLimiter(
-            max_rate=1,
-            time_period=1
-        )
+        file_size = file.stat().st_size
+        logger.info(f"Uploading file '{file}' with size {file_size} bytes to temporary endpoint")
 
         timeout = aiohttp.ClientTimeout(total=300)
+
+        if file_size < 500000:
+            chosen_rate_limiter = self.rate_limiter
+        elif file_size < 250000000:
+            chosen_rate_limiter = self.medium_rate_limiter
+        else:
+            chosen_rate_limiter = self.heavy_rate_limiter
 
         with open(file, "rb") as file_content:
             form = aiohttp.FormData()
@@ -1436,8 +1442,9 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                     headers=self.headers,
                     data=form,
                     timeout=timeout
-                ) as response, rate_limiter:
+                ) as response, chosen_rate_limiter:
                 response_json = await response.json()
+                logger.info(f"Uploaded file '{file}' to temporary endpoint")
                 try:
                     response.raise_for_status()
                 except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
