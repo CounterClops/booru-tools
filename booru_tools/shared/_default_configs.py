@@ -13,6 +13,7 @@ class DefaultCoreConfig(DefaultConfigBaseGroup):
     allowed_safety:list = field(default_factory=lambda: ["safe", "sketchy", "unsafe"])
     minimum_score:int = field(default=10)
     destination:str = field(default="szurubooru")
+    add_video_metatags:bool = field(default=False)
 
 ### Commands
 @dataclass(kw_only=True)

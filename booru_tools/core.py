@@ -13,6 +13,7 @@ import signal
 from booru_tools.loaders import plugin_loader
 from booru_tools.plugins import _plugin_template
 from booru_tools.shared import errors, resources, constants, config
+from booru_tools.tools.ffmpeg import FFmpeg
 
 class GracefulExit(SystemExit):
     code = 1
@@ -165,6 +166,9 @@ class BooruTools:
                 else:
                     logger.debug(f"File '{post.local_file.name}' found for '{post.id}'")
                     post = self.add_missing_post_hashes(post=post)
+                
+                if self.config["core"]["add_video_metatags"]:
+                    post = FFmpeg.add_video_tags(post=post)
 
                 if post.post_url:
                     if post.post_url not in post.sources:
