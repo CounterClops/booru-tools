@@ -95,16 +95,20 @@ class FFmpeg:
                 names.append(f"longer_than_{second_block}_seconds")
             
             if second_block % 60 == 0:
-                minute = second_block / 60
+                minute = int(second_block / 60)
                 if minute > 5:
                     if minute % 10 == 0:
                         names.append(f"longer_than_{minute}_minutes")
                 else:
                     names.append(f"longer_than_{minute}_minute{"s" if second_block > 60 else ""}")
-                
-            duration_tags.append(
-                resources.InternalTag(names=names, category=constants.TagCategory.META)
+            
+            tag = resources.InternalTag(
+                names=names,
+                category=constants.TagCategory.META,
+                implications=[tag for tag in duration_tags]
             )
+
+            duration_tags.append(tag)
 
         return duration_tags
 
