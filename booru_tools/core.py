@@ -178,7 +178,7 @@ class BooruTools:
                 
                 for source in post.sources:
                     if self.destination_plugin.URL_BASE in source:
-                        logger.debug(f"Removing source as its for the destination site '{post.id}'")
+                        logger.debug(f"Removing source '{source}' as its for the destination site '{self.destination_plugin.URL_BASE}'")
                         post.sources.pop(post.sources.index(source))
 
                 if post.tags:
