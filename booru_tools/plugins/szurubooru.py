@@ -16,6 +16,7 @@ import functools
 
 from booru_tools.plugins import _plugin_template
 from booru_tools.shared import resources, errors, constants
+from booru_tools.downloaders import gallerydl
 
 class SzurubooruError(Exception):
     pass
@@ -604,7 +605,7 @@ class ImageSearch(Generic[T], SzurubooruResource):
 
 
 class SharedAttributes:
-    _DOMAINS = []
+    _DOMAINS = ["szurubooru.equus.soy"]
     _CATEGORY = [
         "szurubooru"
     ]
@@ -615,17 +616,96 @@ class SharedAttributes:
     @property
     def DEFAULT_POST_SEARCH_URL(self):
         return f"{self.URL_BASE}/posts"
+    
+    @property
+    def DOWNLOAD_MANAGER(self):
+        try:
+            return self._downloader
+        except NotImplementedError:
+            logger.debug("Creating a new downloader")
+        
+        extra_args = []
+        if self.username and self.password:
+            extra_args.extend(
+                [
+                    "-o",
+                    f"username={self.username}",
+                    "-o",
+                    f"token={self.password}"
+                ]
+            )
+
+        self._downloader = gallerydl.GalleryDlManager(
+            extractor="szurubooru",
+            extra_params=extra_args
+        )
+
+        return self._downloader
 
 class SzurubooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
+    def get_id(self, metadata:dict) -> int:
+        id:int = metadata['id']
+        return id
+
+    def get_sources(self, metadata:dict) -> list[str]:
+        source:str = metadata['source']
+        sources = source.split("\n")
+        return sources
+
+    def get_score(self, metadata:dict) -> int:
+        score:int = metadata['score']
+        return score
+
+    def get_tags(self, metadata:dict) -> list[resources.InternalTag]:
+        all_tags:list[resources.InternalTag] = []
+
+        for key, value in metadata.items():
+            if not key.startswith("tags_"):
+                continue
+            if not value:
+                continue
+            logger.debug(f"Found tag string {key}")
+            category = key.replace("tags_", "")
+            for tag in value:
+                tag = resources.InternalTag(
+                    names=[tag],
+                    category=category
+                )
+                all_tags.append(tag)
+        
+        logger.debug(f"Found {len(all_tags)} tags")
+        return all_tags
+
+    def get_created_at(self, metadata:dict) -> datetime:
+        datetime_str:str = metadata["creationTime"]
+        datetime_obj:datetime = datetime.fromisoformat(datetime_str)
+        return datetime_obj
+
+    def get_updated_at(self, metadata:dict) -> datetime:
+        datetime_str:str = metadata["lastEditTime"]
+        if not datetime_str:
+            return None
+        
+        datetime_obj:datetime = datetime.fromisoformat(datetime_str)
+        return datetime_obj
+
+    def get_safety(self, metadata: dict) -> str:
+        safety:str = metadata.get("safety", constants.Safety._DEFAULT)
+        return safety
+
+    def get_md5(self, metadata:dict) -> str:
+        md5:str = metadata['checksumMD5']
+        return md5
+    
+    def get_sha1(self, metadata:dict) -> str:
+        sha1:str = metadata['checksum']
+        return sha1
+
     def get_post_url(self, metadata:dict) -> str:
         post_id = metadata["id"]
         url = f"{self.URL_BASE}/post/{post_id}"
         logger.debug(f"Generated the post URL '{url}'")
         return url
-    
-    def get_safety(self, metadata: dict) -> str:
-        safety = metadata.get("rating", "safe")
-        return safety
 
 class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
     def __init__(self, session: aiohttp.ClientSession = None) -> None:
@@ -634,8 +714,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         self.create_sql_fixes = False
         self.force_source_check = False
         self.rate_limiter = AsyncLimiter(
-            max_rate=200,
-            time_period=60
+            max_rate=30,
+            time_period=15
         )
         self.medium_rate_limiter = AsyncLimiter(
             max_rate=5,

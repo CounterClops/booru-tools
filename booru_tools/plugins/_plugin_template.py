@@ -95,7 +95,7 @@ class MetadataPlugin(_base.PluginBase):
             "relations": [self.get_relations, [metadata]],
             "safety": [self.get_safety, [metadata]],
             "md5": [self.get_md5, [metadata]],
-            "sha": [self.get_sha1, [metadata]],
+            "sha1": [self.get_sha1, [metadata]],
             "deleted": [self.get_deleted, [metadata]],
             "post_url": [self.get_post_url, [metadata]],
             "pools": [self.get_pools, [metadata]],
