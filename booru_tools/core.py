@@ -159,6 +159,7 @@ class BooruTools:
         logger.info(f"Updating {len(posts)} posts")
 
         tasks:list[asyncio.Task] = []
+        found_tags = []
         async with asyncio.TaskGroup() as task_group:
             for post in posts:
                 if not post.local_file:
@@ -174,6 +175,9 @@ class BooruTools:
                     if post.post_url not in post.sources:
                         logger.debug(f"Updating post ({post.id}) sources with '{post.post_url}'")
                         post.sources.append(post.post_url)
+                
+                if post.tags:
+                    found_tags.extend(post.tags)
 
                 logger.debug(f"Updating post '{post.id}'")
                 task = task_group.create_task(
@@ -181,6 +185,9 @@ class BooruTools:
                 )
                 tasks.append(task)
         results = [task.result() for task in tasks]
+
+        filtered_tags = self.filter_tags(tags=found_tags)
+        await self.update_tags(tags=filtered_tags)
 
     def check_post_allowed(self, post:resources.InternalPost):
         blacklisted_tags = self.config["core"]["blacklisted_tags"]
@@ -312,3 +319,15 @@ class BooruTools:
         for pair in override_pairs:
             key, value = pair.split("=")
             setattr(plugin, key, value)
+
+    @staticmethod
+    def filter_tags(tags:list[resources.InternalTag]) -> list[resources.InternalTag]:
+        filtered_tags = []
+        for tag in tags:
+            if tag in filtered_tags:
+                continue
+            if tag.category.lower() in [constants.TagCategory._DEFAULT, constants.TagCategory.INVALID]:
+                continue
+            filtered_tags.append(tag)
+        logger.debug(f"Filtered out tags in default category, going from {len(tags)} tags to {len(filtered_tags)} tags")
+        return filtered_tags

@@ -4,15 +4,15 @@ ROOT_FOLDER = Path(__file__).parent.parent
 TEMP_FOLDER = Path("tmp")
 
 class TagCategory:
-    GENERAL = "General"
-    ARTIST = "Artist"
-    CONTRIBUTOR = "Contributor"
-    COPYRIGHT = "Copyright"
-    CHARACTER = "Character"
-    SPECIES = "Species"
-    INVALID = "Invalid"
-    META = "Meta"
-    LORE = "Lore"
+    GENERAL = "general"
+    ARTIST = "artist"
+    CONTRIBUTOR = "contributor"
+    COPYRIGHT = "copyright"
+    CHARACTER = "character"
+    SPECIES = "species"
+    INVALID = "invalid"
+    META = "meta"
+    LORE = "lore"
     _DEFAULT = GENERAL
 
     HEX_COLOURS = {

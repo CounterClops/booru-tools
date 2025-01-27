@@ -12,7 +12,6 @@ from booru_tools.plugins import _plugin_template
 class MigratePostsCommand():
     def __init__(self):
         self.blank_download_page_count = 0
-        self.all_tags:list[resources.InternalTag] = []
     
     async def post_init(self, 
                 destination:str, 
@@ -66,18 +65,9 @@ class MigratePostsCommand():
                     logger.critical(traceback.format_exc())
                 finally:
                     job.cleanup_folders()
-
-        # filtered_tags = self._filter_tags(tags=self.all_tags)
-        # await self.booru_tools.update_tags(tags=filtered_tags)
-        # self.all_tags = []
         
         self.booru_tools.cleanup_process_directories()
         await self.booru_tools.session_manager.close()
-    
-    def _filter_tags(self, tags:list[resources.InternalTag]) -> list[resources.InternalTag]:
-        filtered_tags = [tag for tag in tags if tag.category != constants.TagCategory._DEFAULT]
-        logger.debug(f"Filtered out tags in default category, going from {len(tags)} tags to {len(filtered_tags)} tags")
-        return filtered_tags
 
     def check_for_allowed_post(self, post:resources.InternalPost):
         if not self.booru_tools.check_post_allowed(post=post):
@@ -108,11 +98,6 @@ class MigratePostsCommand():
                     logger.debug(f"Marking post '{post.id}' as something to be ignored")
                     item.ignore = True
                     continue
-
-                for tag in post.tags:
-                    if tag in self.all_tags:
-                        continue
-                    self.all_tags.append(tag)
             
             posts = [item.resource for item in job.download_items if item.ignore == False]
             existing_post_tasks = await self._check_for_existing_posts(posts=posts)
