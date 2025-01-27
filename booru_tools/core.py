@@ -226,6 +226,8 @@ class BooruTools:
         for tags_chunk in self.divide_chunks(tags, chunk_size):
             chunk_count += 1
             completion_percent = int(((chunk_count * chunk_size) / total_tags) * 100)
+            if completion_percent > 100:
+                completion_percent = 100
             logger.info(f"Processing chunk {chunk_count} ({len(tags_chunk)}/{chunk_size}) of {total_tags} tags ({completion_percent}%)")
             tasks:list[asyncio.Task] = []
             async with asyncio.TaskGroup() as task_group:
