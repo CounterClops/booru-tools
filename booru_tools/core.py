@@ -176,6 +176,11 @@ class BooruTools:
                         logger.debug(f"Updating post ({post.id}) sources with '{post.post_url}'")
                         post.sources.append(post.post_url)
                 
+                for source in post.sources:
+                    if self.destination_plugin.URL_BASE in source:
+                        logger.debug(f"Removing source as its for the destination site '{post.id}'")
+                        post.sources.pop(post.sources.index(source))
+
                 if post.tags:
                     found_tags.extend(post.tags)
 
@@ -187,6 +192,7 @@ class BooruTools:
         results = [task.result() for task in tasks]
 
         filtered_tags = self.filter_tags(tags=found_tags)
+        logger.info(f"Updating tags for {len(filtered_tags)} tags")
         await self.update_tags(tags=filtered_tags)
 
     def check_post_allowed(self, post:resources.InternalPost):
