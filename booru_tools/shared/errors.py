@@ -75,9 +75,10 @@ class RetryOnExceptions:
                 logger.debug(f"{e}")
                 attempt_count = 1
                 while attempt_count < self.retry_limit:
+                    wait_time = self.wait_time*attempt_count
                     try:
-                        logger.debug(f"Retrying in {self.wait_time}s")
-                        await asyncio.sleep(self.wait_time)
+                        logger.debug(f"Retrying in {wait_time}s")
+                        await asyncio.sleep(wait_time)
                         return await func(*args, **kwargs)
                     except self.exceptions as e:
                         logger.debug(f"Encountered '{e}', on attempt {attempt_count}")
