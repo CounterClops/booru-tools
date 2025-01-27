@@ -53,6 +53,7 @@ class FFmpeg:
         logger.debug(f"Generating video tags for {ffmpeg_json['format']['filename']}")
         duration_tags = cls._generate_video_duration_tags(ffmpeg_json)
         post.tags.extend(duration_tags)
+        post.tags.append(resources.InternalTag(names=["video"], category=constants.TagCategory.META))
 
         return post
 
@@ -85,6 +86,7 @@ class FFmpeg:
         second_blocks = [30 * (i + 1) for i in range(duration_chunks)]
 
         duration_tags:list[resources.InternalTag] = []
+        
         for second_block in second_blocks:
             logger.debug(f"Duration block: {second_block}")
             names = []
