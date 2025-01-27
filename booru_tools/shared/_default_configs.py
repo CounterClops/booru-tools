@@ -29,7 +29,7 @@ class DefaultCommandsImportConfig(DefaultConfigBaseGroup):
 
 @dataclass(kw_only=True)
 class DefaultCommandsConfig(DefaultConfigBaseGroup):
-    import_:DefaultCommandsImportConfig = field(default_factory=DefaultCommandsImportConfig)
+    migrate:DefaultCommandsImportConfig = field(default_factory=DefaultCommandsImportConfig)
 
 ### Downloaders
 @dataclass(kw_only=True)

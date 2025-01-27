@@ -9,7 +9,7 @@ from booru_tools import core
 from booru_tools.shared import resources, constants
 from booru_tools.plugins import _plugin_template
 
-class ImportPostsCommand():
+class MigratePostsCommand():
     def __init__(self):
         self.blank_download_page_count = 0
         self.all_tags:list[resources.InternalTag] = []
@@ -51,13 +51,6 @@ class ImportPostsCommand():
             url_base = url_base.rstrip("/")
             self.booru_tools.destination_plugin.URL_BASE = url_base
 
-        # Maybe expand this out to get tags from the destination plugin and populate aliases. Extra toggle maybe?
-        self.blacklisted_tags = self.booru_tools.split_tag_list(blacklisted_tags)
-        self.required_tags = self.booru_tools.split_tag_list(required_tags)
-        self.allowed_blank_pages = allowed_blank_pages
-        self.download_page_size = download_page_size
-        self.minimum_score = minimum_score
-
     async def run(self, *args, **kwargs):
         await self.post_init(*args, **kwargs)
         processed_posts = []
@@ -92,7 +85,7 @@ class ImportPostsCommand():
             return False
         return True
 
-    async def download_posts_from_url(self, url:str):
+    async def download_posts_from_url(self, url:str, force_download:bool=False):
         domain:str = urlparse(url).hostname
 
         meta_plugin:_plugin_template.MetadataPlugin = self.booru_tools.metadata_loader.load_matching_plugin(domain=domain)
@@ -131,6 +124,8 @@ class ImportPostsCommand():
                 existing_post:resources.InternalPost = existing_post_tasks[item.resource.id].result()
                 if existing_post:
                     post:resources.InternalPost = existing_post.merge_resource(update_object=post, deep_copy=False)
+                    if force_download:
+                        item.media_download_desired = True
                 else:
                     item.media_download_desired = True
 
@@ -163,5 +158,5 @@ class ImportPostsCommand():
 @click.option('--allowed-safety', type=str, default="", help=f"The comma seperated list of allowed safety ratings from [{constants.Safety.SAFE},{constants.Safety.SKETCHY},{constants.Safety.UNSAFE}]")
 # Need to add something to require specific ratings as these aren't generally
 def cli(*args, **kwargs):
-    command = ImportPostsCommand()
+    command = MigratePostsCommand()
     asyncio.run(command.run(*args, **kwargs))
