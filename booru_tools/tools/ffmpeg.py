@@ -17,6 +17,10 @@ class FFmpeg:
 
     @classmethod
     def add_video_tags(cls, post:resources.InternalPost) -> resources.InternalPost:
+        if not post.local_file:
+            logger.debug(f"Post {post.id} has no local file, skipping ffmpeg tagging")
+            return post
+        
         if not cls._check_file_supported(post.local_file):
             logger.debug(f"File {post.local_file} is not supported for video tagging")
             return post
@@ -79,11 +83,28 @@ class FFmpeg:
 
         duration_chunks = int(duration // 30)
         second_blocks = [30 * (i + 1) for i in range(duration_chunks)]
-        duration_strings = [
-            resources.InternalTag(names=[f"longer_than_{second_block}_seconds"], category=constants.TagCategory.META) for second_block in second_blocks
-        ]
 
-        return duration_strings
+        duration_tags:list[resources.InternalTag] = []
+        for second_block in second_blocks:
+            logger.debug(f"Duration block: {second_block}")
+            names = []
+
+            if second_block < 100:
+                names.append(f"longer_than_{second_block}_seconds")
+            
+            if second_block % 60 == 0:
+                minute = second_block / 60
+                if minute > 5:
+                    if minute % 10 == 0:
+                        names.append(f"longer_than_{minute}_minutes")
+                else:
+                    names.append(f"longer_than_{minute}_minute{"s" if second_block > 60 else ""}")
+                
+            duration_tags.append(
+                resources.InternalTag(names=names, category=constants.TagCategory.META)
+            )
+
+        return duration_tags
 
     @classmethod
     def _check_file_supported(cls, file:Path) -> bool:
