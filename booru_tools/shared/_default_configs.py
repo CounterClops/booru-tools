@@ -60,6 +60,17 @@ class DefaultPluginsSzurubooruConfig(DefaultConfigBaseGroup):
 class DefaultPluginsConfig(DefaultConfigBaseGroup):
     szurubooru:DefaultPluginsSzurubooruConfig = field(default_factory=DefaultPluginsSzurubooruConfig)
 
+### Tools
+@dataclass(kw_only=True)
+class DefaultToolsFfmpegConfig(DefaultConfigBaseGroup):
+    enabled:bool = field(default=True)
+    create_duration_tags:bool = field(default=True)
+    create_basic_video_tags:bool = field(default=True)
+
+@dataclass(kw_only=True)
+class DefaultToolsConfig(DefaultConfigBaseGroup):
+    ffmpeg:DefaultToolsFfmpegConfig = field(default_factory=DefaultToolsFfmpegConfig)
+
 ### Default Config
 @dataclass(kw_only=True)
 class DefaultConfig(DefaultConfigBaseGroup):
@@ -68,3 +79,4 @@ class DefaultConfig(DefaultConfigBaseGroup):
     downloaders:DefaultDownloadersConfig = field(default_factory=DefaultDownloadersConfig)
     networking:DefaultNetworkingConfig = field(default_factory=DefaultNetworkingConfig)
     plugins:DefaultPluginsConfig = field(default_factory=DefaultPluginsConfig)
+    tools:DefaultToolsConfig = field(default_factory=DefaultToolsConfig)

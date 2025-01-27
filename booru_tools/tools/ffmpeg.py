@@ -3,7 +3,7 @@ from loguru import logger
 import subprocess
 import json
 
-from booru_tools.shared import resources, constants
+from booru_tools.shared import resources, constants, config
 
 # My thoughts are that we can use this as a part of some post download image processing for post meta data
 # Things like tagging webm/video for webm files, mp4 files etc, tagging with things like duration_over_60_seconds, sound
@@ -17,6 +17,12 @@ class FFmpeg:
 
     @classmethod
     def add_video_tags(cls, post:resources.InternalPost) -> resources.InternalPost:
+        config_manager = config.ConfigManager()
+        
+        if not config_manager["tools"]["ffmpeg"]["enabled"]:
+            logger.debug(f"FFmpeg is disabled, skipping video tagging")
+            return post
+
         if not post.local_file:
             logger.debug(f"Post {post.id} has no local file, skipping ffmpeg tagging")
             return post
@@ -47,13 +53,15 @@ class FFmpeg:
         logger.debug(f"Loading JSON from ffprobe output")
         ffmpeg_json = json.loads(command_output.stdout)
 
-        logger.debug(f"Generating audio tags for {ffmpeg_json['format']['filename']}")
-        post.tags.extend(cls._generate_audio_tags(ffmpeg_json))
+        if config_manager["tools"]["ffmpeg"]["create_basic_video_tags"]:
+            logger.debug(f"Generating audio/video tags for {ffmpeg_json['format']['filename']}")
+            post.tags.extend(cls._generate_audio_tags(ffmpeg_json))
+            post.tags.append(resources.InternalTag(names=["video"], category=constants.TagCategory.META))
 
-        logger.debug(f"Generating video tags for {ffmpeg_json['format']['filename']}")
-        duration_tags = cls._generate_video_duration_tags(ffmpeg_json)
-        post.tags.extend(duration_tags)
-        post.tags.append(resources.InternalTag(names=["video"], category=constants.TagCategory.META))
+        if config_manager["tools"]["ffmpeg"]["create_duration_tags"]:
+            logger.debug(f"Generating video duration tags for {ffmpeg_json['format']['filename']}")
+            duration_tags = cls._generate_video_duration_tags(ffmpeg_json)
+            post.tags.extend(duration_tags)
 
         return post
 
@@ -104,8 +112,7 @@ class FFmpeg:
             
             tag = resources.InternalTag(
                 names=names,
-                category=constants.TagCategory.META,
-                implications=[tag for tag in duration_tags]
+                category=constants.TagCategory.META
             )
 
             duration_tags.append(tag)
