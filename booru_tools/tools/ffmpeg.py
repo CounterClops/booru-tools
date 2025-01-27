@@ -31,6 +31,10 @@ class FFmpeg:
             logger.debug(f"File {post.local_file} is not supported for video tagging")
             return post
         
+        if not cls._check_ffmpeg_installed():
+            logger.warning(f"FFmpeg is not installed, unable to create video tags")
+            return post
+        
         command = [
             "ffprobe",
             "-v", "quiet",
@@ -123,3 +127,18 @@ class FFmpeg:
     def _check_file_supported(cls, file:Path) -> bool:
         is_file_supported = file.suffix in cls._SUPPORTED_FILE_EXTENSIONS
         return is_file_supported
+    
+    @classmethod
+    def _check_ffmpeg_installed(cls) -> bool:
+        command = ["ffprobe", "-version"]
+        try:
+            command_output = subprocess.run(
+                command,
+                capture_output=True,
+                encoding='utf-8'
+            )
+        except FileNotFoundError:
+            return False
+
+        logger.debug(f"Confirmed ffprobe installed")
+        return command_output.returncode == 0
