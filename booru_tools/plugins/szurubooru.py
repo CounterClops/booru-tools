@@ -217,7 +217,7 @@ class SzurubooruErrorHandler:
                 except json.decoder.JSONDecodeError as e:
                     szurubooru_error_class = errors.HTTP_CODE_MAP.get(error.status, None)
                     if szurubooru_error_class:
-                        logger.critical(f"Provided the arguments args='{args}' and kwargs='{kwargs}'")
+                        # logger.critical(f"Provided the arguments args='{args}' and kwargs='{kwargs}'")
                         raise szurubooru_error_class(f"Failed to decode error message. Full response text is '{error.message}'")
                     logger.critical(f"Failed to decode error message. Full response text is '{error.message}'")
                     logger.critical(f"Provided the arguments args='{args}' and kwargs='{kwargs}'")
@@ -1026,7 +1026,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         return escaped_string
 
     @errors.RetryOnExceptions(
-        exceptions=[errors.GatewayTimeout],
+        exceptions=[errors.GatewayTimeout, errors.ServiceUnavailable],
         wait_time=30,
         retry_limit=6
     )
@@ -1059,7 +1059,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         return post_search
 
     @errors.RetryOnExceptions(
-        exceptions=[errors.GatewayTimeout],
+        exceptions=[errors.GatewayTimeout, errors.ServiceUnavailable],
         wait_time=30,
         retry_limit=6
     )
@@ -1091,7 +1091,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         return tag_search
 
     @errors.RetryOnExceptions(
-        exceptions=[errors.GatewayTimeout],
+        exceptions=[errors.GatewayTimeout, errors.ServiceUnavailable],
         wait_time=30,
         retry_limit=6
     )
@@ -1119,7 +1119,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
     @alru_cache(maxsize=1024, ttl=15)
     @errors.RetryOnExceptions(
-        exceptions=[errors.GatewayTimeout],
+        exceptions=[errors.GatewayTimeout, errors.ServiceUnavailable],
         wait_time=30,
         retry_limit=6
     )
@@ -1148,7 +1148,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         return None
 
     @errors.RetryOnExceptions(
-        exceptions=[errors.GatewayTimeout],
+        exceptions=[errors.GatewayTimeout, errors.ServiceUnavailable],
         wait_time=30,
         retry_limit=6
     )
@@ -1188,7 +1188,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         return tag
 
     @errors.RetryOnExceptions(
-        exceptions=[errors.GatewayTimeout],
+        exceptions=[errors.GatewayTimeout, errors.ServiceUnavailable],
         wait_time=30,
         retry_limit=6
     )
@@ -1230,7 +1230,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         return tag
 
     @errors.RetryOnExceptions(
-        exceptions=[errors.GatewayTimeout],
+        exceptions=[errors.GatewayTimeout, errors.ServiceUnavailable],
         wait_time=30,
         retry_limit=6
     )
@@ -1260,7 +1260,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         return None
 
     @errors.RetryOnExceptions(
-        exceptions=[errors.GatewayTimeout],
+        exceptions=[errors.GatewayTimeout, errors.ServiceUnavailable],
         wait_time=30,
         retry_limit=6
     )
@@ -1297,7 +1297,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         return tag
     
     @errors.RetryOnExceptions(
-        exceptions=[errors.GatewayTimeout],
+        exceptions=[errors.GatewayTimeout, errors.ServiceUnavailable],
         wait_time=30,
         retry_limit=6
     )
@@ -1339,7 +1339,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
     @ValidateUniquePostTags(post_param="post")
     @ProcessingErrorWarnAndSkip()
     @errors.RetryOnExceptions(
-        exceptions=[errors.GatewayTimeout],
+        exceptions=[errors.GatewayTimeout, errors.ServiceUnavailable],
         wait_time=60,
         retry_limit=6
     )
@@ -1385,7 +1385,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
     @ValidateUniquePostTags(post_param="new_post")
     @errors.RetryOnExceptions(
-        exceptions=[errors.GatewayTimeout],
+        exceptions=[errors.GatewayTimeout, errors.ServiceUnavailable],
         wait_time=30,
         retry_limit=6
     )
@@ -1484,7 +1484,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         return thumbnail_content_token
 
     @errors.RetryOnExceptions(
-        exceptions=[errors.GatewayTimeout],
+        exceptions=[errors.GatewayTimeout, errors.ServiceUnavailable],
         wait_time=60,
         retry_limit=6
     )
@@ -1536,7 +1536,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         return token
 
     @errors.RetryOnExceptions(
-        exceptions=[errors.GatewayTimeout],
+        exceptions=[errors.GatewayTimeout, errors.ServiceUnavailable],
         wait_time=30,
         retry_limit=6
     )

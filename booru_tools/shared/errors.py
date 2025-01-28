@@ -65,6 +65,7 @@ class RetryOnExceptions:
         self.wait_time = wait_time
         self.retry_limit = retry_limit
         self.exceptions = tuple(exceptions)
+        self.last_error_message = ""
 
     def __call__(self, func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
         @functools.wraps(func)
@@ -83,4 +84,6 @@ class RetryOnExceptions:
                     except self.exceptions as e:
                         logger.debug(f"Encountered '{e}', on attempt {attempt_count}")
                         attempt_count += 1
+                        self.last_error_message = e
+                logger.critical(f"Retry limit reached, due to '{e}'")
         return wrapper
