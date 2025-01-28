@@ -840,12 +840,12 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
     async def get_all_pools(self) -> list[resources.InternalPool]:
         raise NotImplementedError
 
+    @errors.log_all_errors
     @errors.RetryOnExceptions(
         exceptions=[IntegrityError],
         wait_time=30,
         retry_limit=6
     )
-    @errors.log_all_errors
     async def push_tag(self, tag:resources.InternalTag, replace_tags:bool=False, create_empty_tags:bool=True) -> resources.InternalTag:       
         # Work around as szurubooru returns a 500 error if tag names exceed 190 names
         tag.names = tag.names[:189]
@@ -941,6 +941,11 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         return new_tag.to_resource()
 
     @errors.log_all_errors
+    @errors.RetryOnExceptions(
+        exceptions=[IntegrityError],
+        wait_time=30,
+        retry_limit=6
+    )
     async def push_post(self, post:resources.InternalPost, force_update:bool=False) -> resources.InternalPost:
         merge_ignored_fields = [
             "id",
@@ -1199,6 +1204,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         data = {
             "version": tag._extra[self._NAME]["version"],
+            "names": tag.names,
             "category": tag.category
         }
 
