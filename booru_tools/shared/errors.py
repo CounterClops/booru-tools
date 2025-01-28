@@ -85,5 +85,8 @@ class RetryOnExceptions:
                         logger.debug(f"Encountered '{e}', on attempt {attempt_count}")
                         attempt_count += 1
                         self.last_error_message = e
-                logger.critical(f"Retry limit reached, due to '{e}'")
+                logger.error(f"Retry limit reached when calling {func.__name__}, due to '{e}'")
+                logger.debug(f"Failure limit was reached when calling {func.__name__}, with args={args}, kwargs={kwargs}")
+                logger.debug(traceback.format_exc())
+                raise e
         return wrapper
