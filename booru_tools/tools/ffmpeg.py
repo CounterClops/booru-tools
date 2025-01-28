@@ -84,6 +84,8 @@ class FFmpeg:
         if audio_stream_count > 0:
             logger.debug(f"Found {audio_stream_count} audio streams")
             audio_tags.append(resources.InternalTag(names=["sound"], category=constants.TagCategory.META))
+        else:
+            audio_tags.append(resources.InternalTag(names=["no_sound"], category=constants.TagCategory.META))
 
         return audio_tags
 
