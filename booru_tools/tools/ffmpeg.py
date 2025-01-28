@@ -14,6 +14,7 @@ class FFmpeg:
         ".mp4",
         ".mkv"
     ]
+    _BLOCK_SIZE_SECONDS = 30
 
     @classmethod
     def add_video_tags(cls, post:resources.InternalPost) -> resources.InternalPost:
@@ -85,6 +86,7 @@ class FFmpeg:
             logger.debug(f"Found {audio_stream_count} audio streams")
             audio_tags.append(resources.InternalTag(names=["sound"], category=constants.TagCategory.META))
         else:
+            logger.debug(f"Found no audio streams")
             audio_tags.append(resources.InternalTag(names=["no_sound"], category=constants.TagCategory.META))
 
         return audio_tags
@@ -96,13 +98,14 @@ class FFmpeg:
             float(ffmpeg_json["format"]["duration"])
         )
 
-        duration_chunks = int(duration // 30)
-        second_blocks = [30 * (i + 1) for i in range(duration_chunks)]
+        duration_chunks = int(duration // cls._BLOCK_SIZE_SECONDS)
+        second_blocks = [cls._BLOCK_SIZE_SECONDS * (i + 1) for i in range(duration_chunks)]
 
+        logger.debug(f"Video duration is {duration} seconds with {duration_chunks} {cls._BLOCK_SIZE_SECONDS} second blocks")
         duration_tags:list[resources.InternalTag] = []
         
         for second_block in second_blocks:
-            logger.debug(f"Duration block: {second_block}")
+            logger.debug(f"Processing duration block {second_block}")
             names = []
 
             if second_block < 100:
