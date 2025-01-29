@@ -12,6 +12,7 @@ class GalleryDlManager(_base.DownloadManager):
         self.extractor:str = extractor
         self.page_size:int = page_size
         self.extra_params:list = extra_params
+        self._downloaded_links:list[str] = []
 
         config_manager = config.ConfigManager()
         cookies_file = config_manager['networking']['cookies_file']
@@ -60,9 +61,7 @@ class GalleryDlManager(_base.DownloadManager):
     def download_pending_items(self, job:_base.DownloadJob) -> _base.DownloadJob:
         urls = []
         
-        for item in job.download_items:
-            if not item.media_download_desired:
-                continue
+        for item in job.items_pending_download():
 
             if item.ignore:
                 continue
@@ -72,6 +71,11 @@ class GalleryDlManager(_base.DownloadManager):
             else:
                 logger.warning(f"Resource {item.resource} does not have a post_url, using {item._download_override} instead")
                 download_url = item._download_override
+            
+            if download_url in self._downloaded_links:
+                logger.debug(f"Skipping download of {download_url} as it's already been downloaded")
+                item.media_download_desired = False
+                continue
             
             if download_url:
                 download_url = self.add_extractor_to_url(download_url)
@@ -87,6 +91,7 @@ class GalleryDlManager(_base.DownloadManager):
             *urls
         ]
         self.call_gallerydl(params)
+        self._downloaded_links.extend(urls)
 
         for item in job.download_items:
             if not item.media_download_desired:
@@ -120,9 +125,11 @@ class GalleryDlManager(_base.DownloadManager):
         max_range = self.page_size
 
         downloaded_item_count = self.page_size
-        
+        self._downloaded_links:list[str] = []
+
         while downloaded_item_count:
             range = f"{min_range}-{max_range}"
+            logger.debug(f"Downloading range {range} from {url}")
 
             params = [
                 f"--range={range}",
@@ -130,11 +137,11 @@ class GalleryDlManager(_base.DownloadManager):
             ]
 
             job = self.create_download_job(params)
-            downloaded_item_count = job.all_item_count
 
             min_range = max_range + 1
             max_range += self.page_size
             
             yield job
+            downloaded_item_count = job.all_item_count(only_download_desired=True)
         
         return
