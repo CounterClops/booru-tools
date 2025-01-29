@@ -718,7 +718,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             time_period=1
         )
         self.medium_rate_limiter = AsyncLimiter(
-            max_rate=2,
+            max_rate=3,
             time_period=5
         )
         self.heavy_rate_limiter = AsyncLimiter(
@@ -1042,9 +1042,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             "query": search_query
         }
 
-        logger.debug(f"Searching for posts with query '{search_query}'")
-
         async with self.rate_limiter:
+            logger.debug(f"Searching for posts with query '{search_query}'")
             async with self.session.get(
                     url=url,
                     headers=self.headers,
@@ -1074,9 +1073,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             "query": search_query
         }
 
-        logger.debug(f"Searching for tags with query '{search_query}'")
-
         async with self.rate_limiter:
+            logger.debug(f"Searching for tags with query '{search_query}'")
             async with self.session.get(
                     url=url,
                     headers=self.headers,
@@ -1106,9 +1104,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             "query": search_query
         }
 
-        logger.debug(f"Searching for pools with query '{search_query}'")
-
         async with self.rate_limiter:
+            logger.debug(f"Searching for pools with query '{search_query}'")
             async with self.session.get(
                     url=url,
                     headers=self.headers,
@@ -1136,9 +1133,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         safe_tag = urllib.parse.quote(tag)
         url = f"{self.URL_BASE}/api/tag/{safe_tag}"
 
-        logger.debug(f"Getting tag '{tag}'")
-
         async with self.rate_limiter:
+            logger.debug(f"Getting tag '{tag}'")
             async with self.session.get(
                     url=url,
                     headers=self.headers,
@@ -1178,9 +1174,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 implication_names.extend(implication.names)
             data["implications"] = list(set(implication_names))
 
-        logger.debug(f"Creating tag '{tag.names[0]}' with data={[tag]}")
-
         async with self.medium_rate_limiter:
+            logger.debug(f"Creating tag '{tag.names[0]}' with data={[tag]}")
             async with self.session.post(
                     url=url,
                     headers=self.headers,
@@ -1221,9 +1216,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 implication_names.extend(implication.names)
             data["implications"] = list(set(implication_names))
 
-        logger.debug(f"Attempting to update tag '{tag.names[0]}' with data={[tag]}")
-
         async with self.medium_rate_limiter:
+            logger.debug(f"Attempting to update tag '{tag.names[0]}' with data={[tag]}")
             async with self.session.put(
                     url=url,
                     headers=self.headers,
@@ -1253,9 +1247,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             "version": tag.version,
         }
 
-        logger.debug(f"Attempting to delete tag '{tag.names[0]}' with version {tag.version}")
-
         async with self.medium_rate_limiter:
+            logger.debug(f"Attempting to delete tag '{tag.names[0]}' with version {tag.version}")
             async with self.session.delete(
                     url=url,
                     headers=self.headers,
@@ -1288,9 +1281,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             "mergeTo": to_tag_name,
         }
 
-        logger.debug(f"Attempting to merge tag '{from_tag_name}' [v{from_tag.version}] into {to_tag_name} [v{to_tag.version}]")
-
         async with self.heavy_rate_limiter:
+            logger.debug(f"Attempting to merge tag '{from_tag_name}' [v{from_tag.version}] into {to_tag_name} [v{to_tag.version}]")
             async with self.session.post(
                     url=url,
                     headers=self.headers,
@@ -1375,9 +1367,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         if thumbnail_content_token:
             data["thumbnailToken"]  = thumbnail_content_token
 
-        logger.debug(f"Creating post with data={data}")
-
         async with self.medium_rate_limiter:
+            logger.debug(f"Creating post with data={data}")
             async with self.session.post(
                     url=url,
                     headers=self.headers,
@@ -1421,9 +1412,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         #     logger.debug(f"No new file to update existing post with")
         #     pass
 
-        logger.debug(f"Updating post '{post.id}' with data={data}")
-
         async with self.medium_rate_limiter:
+            logger.debug(f"Updating post '{post.id}' with data={data}")
             async with self.session.put(
                     url=url,
                     headers=self.headers,
@@ -1511,7 +1501,6 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         url = f"{self.URL_BASE}/api/uploads"
 
         file_size = file.stat().st_size
-        logger.info(f"Uploading file '{file}' with size {file_size} bytes to temporary endpoint")
 
         timeout = aiohttp.ClientTimeout(total=300)
 
@@ -1527,6 +1516,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             form.add_field("content", file_content, filename=file.name)
 
             async with chosen_rate_limiter:
+                logger.info(f"Uploading file '{file}' with size {file_size} bytes to temporary endpoint")
                 async with self.session.post(
                         url=url,
                         headers=self.headers,
@@ -1558,9 +1548,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             "contentToken": content_token
         }
 
-        logger.debug(f"Reverse image search with data={data}")
-
         async with self.rate_limiter:
+            logger.debug(f"Reverse image search with data={data}")
             async with self.session.post(
                     url=url,
                     headers=self.headers,
