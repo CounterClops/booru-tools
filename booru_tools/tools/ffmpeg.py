@@ -119,9 +119,15 @@ class FFmpeg:
                 else:
                     names.append(f"longer_than_{minute}_minute{"s" if second_block > 60 else ""}")
             
+            if not names:
+                logger.debug(f"No tags for duration block {second_block}, skipping")
+                continue
+
+            tag_implications = [tag for tag in duration_tags]
             tag = resources.InternalTag(
                 names=names,
-                category=constants.TagCategory.META
+                category=constants.TagCategory.META,
+                implications=tag_implications
             )
 
             duration_tags.append(tag)
