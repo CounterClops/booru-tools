@@ -27,10 +27,15 @@ class DownloadJob:
         self._download_manager.download_pending_items(job=self)
         return None
     
-    @property
-    def all_item_count(self) -> int:
-        return len(self.download_items)
+    def all_item_count(self, only_download_desired:bool=False) -> int:
+        if not only_download_desired:
+            return len(self.download_items)
+        
+        return len(self.items_pending_download())
     
+    def items_pending_download(self) -> list[DownloadItem]:
+        return [item for item in self.download_items if item.media_download_desired]
+
     def cleanup_folders(self) -> None:
         if self.download_folder.exists():
             shutil.rmtree(self.download_folder)
