@@ -36,7 +36,8 @@ class SessionManager:
                 headers=self.default_headers,
                 skip_auto_headers=self.default_headers.keys(),
                 connector=connector,
-                cookies=self.cookies
+                cookies=self.cookies,
+                raise_for_status=True
             )
         return self.session
 
