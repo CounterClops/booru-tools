@@ -727,9 +727,6 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         )
 
         self.sql_fixes_file = Path("szurubooru_fixes.sql")
-        # if self.create_sql_fixes and self.sql_fixes_file.exists():
-        #     logger.info(f"Blanking '{self.sql_fixes_file.absolute()}' as it exists")
-        #     open(self.sql_fixes_file, 'w').close()
     
     @property
     def token(self):
@@ -1047,17 +1044,17 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         logger.debug(f"Searching for posts with query '{search_query}'")
 
-        async with self.session.get(
-                url=url,
-                headers=self.headers,
-                params=params
-            ) as response, self.rate_limiter:
-            try:
-                response.raise_for_status()
-            except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
-                err.message = await response.text()
-                raise err
-            response_json = await response.json()
+        async with self.rate_limiter:
+            async with self.session.get(
+                    url=url,
+                    headers=self.headers,
+                    params=params
+                ) as response:
+                try:
+                    response_json = await response.json()
+                except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                    err.message = await response.text()
+                    raise err
 
         post_search:PagedSearch[Post] = PagedSearch.from_dict(data=response_json, resource_type=Post)
 
@@ -1079,17 +1076,17 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         logger.debug(f"Searching for tags with query '{search_query}'")
 
-        async with self.session.get(
-                url=url,
-                headers=self.headers,
-                params=params
-            ) as response, self.rate_limiter:
-            try:
-                response.raise_for_status()
-            except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
-                err.message = await response.text()
-                raise err
-            response_json = await response.json()
+        async with self.rate_limiter:
+            async with self.session.get(
+                    url=url,
+                    headers=self.headers,
+                    params=params
+                ) as response:
+                try:
+                    response_json = await response.json()
+                except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                    err.message = await response.text()
+                    raise err
 
         tag_search:PagedSearch[Tag] = PagedSearch.from_dict(data=response_json, resource_type=Tag)
 
@@ -1111,12 +1108,18 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         logger.debug(f"Searching for pools with query '{search_query}'")
 
-        async with self.session.get(
-                url=url,
-                headers=self.headers,
-                params=params
-            ) as response, self.rate_limiter:
-            response_json = await response.json()
+        async with self.rate_limiter:
+            async with self.session.get(
+                    url=url,
+                    headers=self.headers,
+                    params=params
+                ) as response:
+
+                try:
+                    response_json = await response.json()
+                except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                    err.message = await response.text()
+                    raise err
 
         pool_search:PagedSearch[Pool] = PagedSearch.from_dict(data=response_json, resource_type=Pool)
         
@@ -1135,16 +1138,17 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         logger.debug(f"Getting tag '{tag}'")
 
-        async with self.session.get(
-                url=url,
-                headers=self.headers,
-            ) as response:
-            try:
-                response.raise_for_status()
-            except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
-                err.message = await response.text()
-                raise err
-            response_json = await response.json()
+        async with self.rate_limiter:
+            async with self.session.get(
+                    url=url,
+                    headers=self.headers,
+                ) as response:
+                try:
+                    response_json = await response.json()
+                except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                    err.message = await response.text()
+                    raise err
+            
 
         if response_json:
             tag = Tag.from_dict(response_json)
@@ -1176,17 +1180,17 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         logger.debug(f"Creating tag '{tag.names[0]}' with data={[tag]}")
 
-        async with self.session.post(
-                url=url,
-                headers=self.headers,
-                json=data
-            ) as response, self.medium_rate_limiter:
-            try:
-                response.raise_for_status()
-            except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
-                err.message = await response.text()
-                raise err
-            response_json = await response.json()
+        async with self.medium_rate_limiter:
+            async with self.session.post(
+                    url=url,
+                    headers=self.headers,
+                    json=data
+                ) as response:
+                try:
+                    response_json = await response.json()
+                except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                    err.message = await response.text()
+                    raise err
         
         tag = Tag.from_dict(response_json)
 
@@ -1219,17 +1223,17 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         logger.debug(f"Attempting to update tag '{tag.names[0]}' with data={[tag]}")
 
-        async with self.session.put(
-                url=url,
-                headers=self.headers,
-                json=data
-            ) as response, self.medium_rate_limiter:
-            try:
-                response.raise_for_status()
-            except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
-                err.message = await response.text()
-                raise err
-            response_json = await response.json()
+        async with self.medium_rate_limiter:
+            async with self.session.put(
+                    url=url,
+                    headers=self.headers,
+                    json=data
+                ) as response:
+                try:
+                    response_json = await response.json()
+                except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                    err.message = await response.text()
+                    raise err
 
         tag = Tag.from_dict(response_json)
 
@@ -1251,17 +1255,17 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         logger.debug(f"Attempting to delete tag '{tag.names[0]}' with version {tag.version}")
 
-        async with self.session.delete(
-                url=url,
-                headers=self.headers,
-                json=data
-            ) as response, self.medium_rate_limiter:
-            try:
-                response.raise_for_status()
-            except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
-                err.message = await response.text()
-                raise err
-            response_json = await response.json()
+        async with self.medium_rate_limiter:
+            async with self.session.delete(
+                    url=url,
+                    headers=self.headers,
+                    json=data
+                ) as response:
+                try:
+                    response_json = await response.text()
+                except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                    err.message = await response.text()
+                    raise err
         
         return None
 
@@ -1286,17 +1290,17 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         logger.debug(f"Attempting to merge tag '{from_tag_name}' [v{from_tag.version}] into {to_tag_name} [v{to_tag.version}]")
 
-        async with self.session.post(
-                url=url,
-                headers=self.headers,
-                json=data
-            ) as response, self.heavy_rate_limiter:
-            try:
-                response_json = await response.json()
-                response.raise_for_status()
-            except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
-                err.message = await response.text()
-                raise err
+        async with self.heavy_rate_limiter:
+            async with self.session.post(
+                    url=url,
+                    headers=self.headers,
+                    json=data
+                ) as response:
+                try:
+                    response_json = await response.json()
+                except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                    err.message = await response.text()
+                    raise err
 
         tag = Tag.from_dict(response_json)
 
@@ -1373,17 +1377,17 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         logger.debug(f"Creating post with data={data}")
 
-        async with self.session.post(
-                url=url,
-                headers=self.headers,
-                json=data
-            ) as response, self.medium_rate_limiter:
-            try:
-                response.raise_for_status()
-            except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
-                err.message = await response.text()
-                raise err
-            response_json = await response.json()
+        async with self.medium_rate_limiter:
+            async with self.session.post(
+                    url=url,
+                    headers=self.headers,
+                    json=data
+                ) as response:
+                try:
+                    response_json = await response.json()
+                except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                    err.message = await response.text()
+                    raise err
 
         post = Post.from_dict(response_json)
 
@@ -1419,17 +1423,17 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         logger.debug(f"Updating post '{post.id}' with data={data}")
 
-        async with self.session.put(
-                url=url,
-                headers=self.headers,
-                json=data
-            ) as response, self.medium_rate_limiter:
-            try:
-                response.raise_for_status()
-            except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
-                err.message = await response.text()
-                raise err
-            response_json = await response.json()
+        async with self.medium_rate_limiter:
+            async with self.session.put(
+                    url=url,
+                    headers=self.headers,
+                    json=data
+                ) as response:
+                try:
+                    response_json = await response.json()
+                except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                    err.message = await response.text()
+                    raise err
 
         post = Post.from_dict(response_json)
 
@@ -1522,19 +1526,19 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             form = aiohttp.FormData()
             form.add_field("content", file_content, filename=file.name)
 
-            async with self.session.post(
-                    url=url,
-                    headers=self.headers,
-                    data=form,
-                    timeout=timeout
-                ) as response, chosen_rate_limiter:
-                response_json = await response.json()
-                logger.info(f"Uploaded file '{file}' to temporary endpoint")
-                try:
-                    response.raise_for_status()
-                except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
-                    err.message = await response.text()
-                    raise err
+            async with chosen_rate_limiter:
+                async with self.session.post(
+                        url=url,
+                        headers=self.headers,
+                        data=form,
+                        timeout=timeout
+                    ) as response:
+                    try:
+                        response_json = await response.json()
+                        logger.info(f"Uploaded file '{file}' to temporary endpoint")
+                    except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                        err.message = await response.text()
+                        raise err
 
         token:str = response_json["token"]
         
@@ -1556,17 +1560,17 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         logger.debug(f"Reverse image search with data={data}")
 
-        async with self.session.post(
-                url=url,
-                headers=self.headers,
-                json=data
-            ) as response, self.rate_limiter:
-            try:
-                response.raise_for_status()
-            except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
-                err.message = await response.text()
-                raise err
-            response_json = await response.json()
+        async with self.rate_limiter:
+            async with self.session.post(
+                    url=url,
+                    headers=self.headers,
+                    json=data
+                ) as response:
+                try:
+                    response_json = await response.json()
+                except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
+                    err.message = await response.text()
+                    raise err
 
         image_search:ImageSearch[Post] = ImageSearch.from_dict(data=response_json)
 
