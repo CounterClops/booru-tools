@@ -35,7 +35,7 @@ class PluginLoader:
     def __init__(self, plugin_class: _base.PluginBase, session: aiohttp.ClientSession = None):
         self.plugins:list[InternalPlugin] = []
         self.plugin_class:_base.PluginBase = plugin_class
-        config_instance = config.ConfigManager()
+        config_instance = config.shared_config_manager
         self.plugin_configs:dict[str, dict] = config_instance["plugins"]
         self.session = session
 
@@ -144,7 +144,7 @@ class PluginLoader:
                 name=name
             )
         except errors.NoPluginFound as e:
-            logger.debug("Couldn't find a matching plugin with ({e})")
+            logger.debug(f"Couldn't find a matching plugin with ({e})")
             return None
 
         if plugin:

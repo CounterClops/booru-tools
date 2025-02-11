@@ -15,6 +15,7 @@ class DownloadItem:
     media_download_desired:bool = field(default=False)
     ignore:bool = field(default=False)
     resource:resources.InternalPost = field(default=None)
+    download_url:str = field(default=None)
     _download_override:Any = field(repr=False, default=None)
 
 @dataclass(kw_only=True)
