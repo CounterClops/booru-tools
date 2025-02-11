@@ -33,7 +33,7 @@ class SharedAttributes:
     REQUIRE_SOURCE_CHECK = True
 
 class NewgroundsValidator(SharedAttributes, _plugin_template.ValidationPlugin):
-    POST_URL_PATTERN = re.compile(r"(https:\/\/[w.]*newgrounds\.com\/portal\/view\/\d+)")
+    POST_URL_PATTERN = re.compile(r"(https:\/\/[w.]*newgrounds\.com\/[\w\d]+\/view\/.+)")
     USER_URL_PATTERN = re.compile(r"(https:\/\/(?!www\.)\w+\.newgrounds\.com)")
     GLOBAL_URL_PATTERN = re.compile(r"(https:\/\/[w.]*newgrounds\.com\/?$)")
     
@@ -78,19 +78,21 @@ class NewgroundsMeta(SharedAttributes, _plugin_template.MetadataPlugin):
         all_tags:list[resources.InternalTag] = []
 
         for tag in artists:
-            tag = resources.InternalTag(
+            tag = tag.replace("-", "_")
+            tag_resource = resources.InternalTag(
                 names=[tag],
                 category=constants.TagCategory.ARTIST
             )
-            all_tags.append(tag)
+            all_tags.append(tag_resource)
         
         for tag in str_tags:
+            tag = tag.replace("-", "_")
             if tag in artists:
                 continue
-            tag = resources.InternalTag(
+            tag_resource = resources.InternalTag(
                 names=[tag]
             )
-            all_tags.append(tag)
+            all_tags.append(tag_resource)
         
         return all_tags
 
