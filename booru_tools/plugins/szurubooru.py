@@ -217,11 +217,10 @@ class SzurubooruErrorHandler:
                 except json.decoder.JSONDecodeError as e:
                     szurubooru_error_class = errors.HTTP_CODE_MAP.get(error.status, None)
                     if szurubooru_error_class:
-                        # logger.critical(f"Provided the arguments args='{args}' and kwargs='{kwargs}'")
                         raise szurubooru_error_class(f"Failed to decode error message. Full response text is '{error.message}'")
-                    logger.critical(f"Failed to decode error message. Full response text is '{error.message}'")
-                    logger.critical(f"Provided the arguments args='{args}' and kwargs='{kwargs}'")
-                    logger.critical(traceback.format_exc())
+                    logger.warning(f"Failed to decode error message. Full response text is '{error.message}'")
+                    logger.warning(f"Running {func.__name__} and provided the arguments args='{args}' and kwargs='{kwargs}'")
+                    logger.debug(traceback.format_exc())
                     raise error
                 except KeyError as e:
                     logger.critical(f"Encountered unknown aiohttp error '{e}'")
@@ -718,8 +717,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             time_period=1
         )
         self.medium_rate_limiter = AsyncLimiter(
-            max_rate=3,
-            time_period=5
+            max_rate=1,
+            time_period=3
         )
         self.heavy_rate_limiter = AsyncLimiter(
             max_rate=1,
@@ -769,6 +768,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 logger.debug(f"Post not found with sha1: {post.sha1}")
 
         if self.force_source_check or post.plugins.meta.REQUIRE_SOURCE_CHECK:
+            logger.debug(f"Checking for source links")
             for source in post.sources_of_type(desired_source_type=constants.SourceTypes.POST):
                 search_query = f"source:{source}"
                 post_search = await self._post_search(
@@ -837,7 +837,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
     async def get_all_pools(self) -> list[resources.InternalPool]:
         raise NotImplementedError
 
-    @errors.log_all_errors
+    @errors.suppress_errors
     @errors.RetryOnExceptions(
         exceptions=[IntegrityError],
         wait_time=30,
@@ -907,7 +907,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         # Work around as szurubooru returns a 500 error if tag names exceed 190 names
         desired_tag.names = desired_tag.names[:189]
 
-        proposed_tag_changes = desired_tag.diff(resource=tag)
+        proposed_tag_changes = desired_tag.diff(resource=primary_tag_resource)
+
         if not proposed_tag_changes:
             logger.debug(f"Skipping update on tag '{primary_tag_name}' as it already matches (Post-conflict scan)")
             return desired_tag
@@ -937,7 +938,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         return new_tag.to_resource()
 
-    @errors.log_all_errors
+    @errors.suppress_errors
     @errors.RetryOnExceptions(
         exceptions=[IntegrityError],
         wait_time=30,
@@ -967,7 +968,14 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
             if not similar_posts:
                 logger.debug("No similar posts found, creating new post")
-                new_post = await self._create_post(post=post)
+                try:
+                    new_post = await self._create_post(post=post)
+                except errors.Conflict as error:
+                    logger.error(f"Failed to create post '{post.id}' with error '{error}'")
+                    new_post = await self.find_exact_post(post=post)
+                    if not new_post:
+                        logger.error(f"Failed to find exact post '{post.id}' after conflict")
+                        return None
                 new_post_resource = new_post.to_resource()
                 if self.create_sql_fixes:
                     created_post_with_original_date:resources.InternalPost = new_post_resource.merge_resource(update_object=post, fields_to_ignore=merge_ignored_fields)
@@ -977,10 +985,18 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             closest_post = self._check_similar_posts_for_exact(posts=similar_posts)
             closest_post_resource = closest_post.to_resource()
             desired_post:resources.InternalPost = closest_post_resource.merge_resource(update_object=post, fields_to_ignore=merge_ignored_fields)
-            new_post = await self._update_post(post=desired_post)
-            self._generate_sql_fixes(post=desired_post)
+            try:
+                new_post = await self._update_post(post=desired_post)
+                self._generate_sql_fixes(post=desired_post)
+            except errors.Conflict as error:
+                logger.error(f"Failed to update post '{post.id}' with error '{error}'")
+                new_post = await self.find_exact_post(post=desired_post)
             return new_post.to_resource()
         
+        if not exact_post:
+            logger.debug(f"No exact post found for '{post.id}'")
+            return None
+
         logger.debug(f"No local file found. Updating post metadata with id={exact_post.id}")
         
         desired_post:resources.InternalPost = exact_post.merge_resource(update_object=post, fields_to_ignore=merge_ignored_fields)
