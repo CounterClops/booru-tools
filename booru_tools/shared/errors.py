@@ -21,6 +21,12 @@ class MissingFile(Exception):
 
 ### HTTP errors
 
+class BadRequest(Exception):
+    pass
+
+class Conflict(Exception):
+    pass
+
 class ContentTooLarge(Exception):
     pass
 
@@ -37,6 +43,8 @@ class GatewayTimeout(Exception):
     pass
 
 HTTP_CODE_MAP = {
+    400: BadRequest,
+    409: Conflict,
     413: ContentTooLarge,
     429: TooManyRequestsError,
     500: InternalServerError,
@@ -58,6 +66,16 @@ def log_all_errors(func: Callable[P, Awaitable[R]], reraise_errors:bool=False) -
             logger.critical(traceback.format_exc())
             if reraise_errors:
                 raise error
+    return wrapper
+
+def suppress_errors(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+    @functools.wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> R:
+        try:
+            return await func(*args, **kwargs)
+        except Exception as error:
+            error_message = f"Supressing {error} when running {func.__name__}"
+            logger.warning(error_message)
     return wrapper
 
 class RetryOnExceptions:
@@ -85,6 +103,9 @@ class RetryOnExceptions:
                         logger.debug(f"Encountered '{e}', on attempt {attempt_count}")
                         attempt_count += 1
                         self.last_error_message = e
+                    except Conflict as e:
+                        logger.warning(f"HTTP Conflict error when calling {func.__name__}, due to '{e}'")
+                        logger.debug(f"Stopping retry attempts as this is a HTTP conflict error")
                 logger.error(f"Retry limit reached when calling {func.__name__}, due to '{e}'")
                 logger.debug(f"Failure limit was reached when calling {func.__name__}, with args={args}, kwargs={kwargs}")
                 logger.debug(traceback.format_exc())
