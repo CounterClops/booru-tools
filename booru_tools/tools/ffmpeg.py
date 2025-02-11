@@ -18,7 +18,7 @@ class FFmpeg:
 
     @classmethod
     def add_video_tags(cls, post:resources.InternalPost) -> resources.InternalPost:
-        config_manager = config.ConfigManager()
+        config_manager = config.shared_config_manager
         
         if not config_manager["tools"]["ffmpeg"]["enabled"]:
             logger.debug(f"FFmpeg is disabled, skipping video tagging")
