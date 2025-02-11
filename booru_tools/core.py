@@ -84,7 +84,7 @@ class BooruTools:
         else:
             self.booru_plugin_directory = Path(booru_plugin_directory)
         
-        self.config = config.ConfigManager()
+        self.config = config.shared_config_manager
         self.tmp_directory = constants.TEMP_FOLDER
         self.session_manager = SessionManager(
             limit_per_host=self.config["networking"].get("limit_per_host", 20)
@@ -161,37 +161,42 @@ class BooruTools:
 
         tasks:list[asyncio.Task] = []
         found_tags = []
-        async with asyncio.TaskGroup() as task_group:
-            for post in posts:
-                if not post.local_file:
-                    logger.debug(f"No file to upload for '{post.id}'")
-                else:
-                    logger.debug(f"File '{post.local_file.name}' found for '{post.id}'")
-                    post = self.add_missing_post_hashes(post=post)
-                
-                if self.config["core"]["add_video_metatags"]:
-                    post = FFmpeg.add_video_tags(post=post)
+        chunk_count = 0
+        chunk_size = 50
+        total_post_count = len(posts)
+        for posts_chunk in self.divide_chunks(posts, chunk_size):
+            chunk_count += 1
+            self.log_chunk_progress(chunk=posts_chunk, chunk_count=chunk_count, total_chunk_size=total_post_count)
+            async with asyncio.TaskGroup() as task_group:
+                for post in posts:
+                    if not post.local_file:
+                        logger.debug(f"No file to upload for '{post.id}'")
+                    else:
+                        logger.debug(f"File '{post.local_file.name}' found for '{post.id}'")
+                        post = self.add_missing_post_hashes(post=post)
+                    
+                    if self.config["core"]["add_video_metatags"]:
+                        post = FFmpeg.add_video_tags(post=post)
 
-                if post.post_url:
-                    if post.post_url not in post.sources:
-                        logger.debug(f"Updating post ({post.id}) sources with '{post.post_url}'")
-                        post.sources.append(post.post_url)
-                
-                for source in post.sources:
-                    if self.destination_plugin.URL_BASE in source:
-                        logger.debug(f"Removing source '{source}' as its for the destination site '{self.destination_plugin.URL_BASE}'")
-                        post.sources.pop(post.sources.index(source))
+                    if post.post_url:
+                        if post.post_url not in post.sources:
+                            logger.debug(f"Updating post ({post.id}) sources with '{post.post_url}'")
+                            post.sources.append(post.post_url)
+                    
+                    for source in post.sources:
+                        if self.destination_plugin.URL_BASE in source:
+                            logger.debug(f"Removing source '{source}' as its for the destination site '{self.destination_plugin.URL_BASE}'")
+                            post.sources.pop(post.sources.index(source))
 
-                if post.tags:
-                    found_tags.extend(post.tags)
+                    if post.tags:
+                        found_tags.extend(post.tags)
 
-                logger.debug(f"Updating post '{post.id}'")
-                task = task_group.create_task(
-                    self.destination_plugin.push_post(post=post)
-                )
-                tasks.append(task)
-        results = [task.result() for task in tasks]
-
+                    logger.debug(f"Updating post '{post.id}'")
+                    task = task_group.create_task(
+                        self.destination_plugin.push_post(post=post)
+                    )
+                    tasks.append(task)
+            results = [task.result() for task in tasks]
         filtered_tags = self.filter_tags(tags=found_tags)
         logger.info(f"Updating tags for {len(filtered_tags)} tags")
         await self.update_tags(tags=filtered_tags)
@@ -226,10 +231,7 @@ class BooruTools:
         total_tags = len(tags)
         for tags_chunk in self.divide_chunks(tags, chunk_size):
             chunk_count += 1
-            completion_percent = int(((chunk_count * chunk_size) / total_tags) * 100)
-            if completion_percent > 100:
-                completion_percent = 100
-            logger.info(f"Processing chunk {chunk_count} ({len(tags_chunk)}/{chunk_size}) of {total_tags} tags ({completion_percent}%)")
+            self.log_chunk_progress(chunk=tags_chunk, chunk_count=chunk_count, total_chunk_size=total_tags)
             tasks:list[asyncio.Task] = []
             async with asyncio.TaskGroup() as task_group:
                 for tag in tags_chunk:
@@ -319,9 +321,19 @@ class BooruTools:
         return tags
     
     @staticmethod
-    def divide_chunks(array:list, max_size:int):
+    def divide_chunks(array:list, max_size:int=50):
         for i in range(0, len(array), max_size): 
             yield array[i:i + max_size]
+
+    @staticmethod
+    def log_chunk_progress(chunk:list, chunk_count:int, total_chunk_size:int) -> None:
+        items_count = len(chunk)
+
+        completion_percent = int(((chunk_count * total_chunk_size) / items_count) * 100)
+        if completion_percent > 100:
+            completion_percent = 100
+        
+        logger.info(f"Processing chunk {chunk_count} {len(items_count)} of {total_chunk_size} items ({completion_percent}%)")
     
     def override_plugin_config(self, plugin:object, plugin_override:str=""):
         override_pairs = plugin_override.split(",")
