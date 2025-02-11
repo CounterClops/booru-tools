@@ -19,8 +19,6 @@ class DefaultCoreConfig(DefaultConfigBaseGroup):
 @dataclass(kw_only=True)
 class DefaultCommandsImportPostsConfig(DefaultConfigBaseGroup):
     urls:list = field(default_factory=list)
-    allowed_blank_pages:int = field(default=1)
-    download_page_size:int = field(default=50)
     import_site:str = field(default=None)
 
 @dataclass(kw_only=True)
@@ -35,7 +33,9 @@ class DefaultCommandsConfig(DefaultConfigBaseGroup):
 @dataclass(kw_only=True)
 class DefaultDownloadersGalleryDlConfig(DefaultConfigBaseGroup):
     page_size:int = field(default=50)
+    allowed_blank_pages:int = field(default=1)
     extra_params:list = field(default_factory=list)
+    ignored_file_extensions:list[str] = field(default_factory=lambda: [".zip"])
 
 @dataclass(kw_only=True)
 class DefaultDownloadersConfig(DefaultConfigBaseGroup):

@@ -8,13 +8,6 @@ import os
 
 from booru_tools.shared import _default_configs
 
-class _Singleton(type):
-    _instance = None
-    def __call__(cls, *args, **kwargs):
-        if cls._instance is None:
-            cls._instance = super().__call__(*args, **kwargs)
-        return cls._instance
-
 class ConfigGroup(dict):
     def __init__(self, data=None):
         super().__init__()
@@ -59,15 +52,18 @@ class ConfigGroup(dict):
             if isinstance(value, dict):
                 if key in self:
                     current_value = self[key]
-                    value = {**current_value, **value}
+                    logger.debug(f"Merging nested data for '{key}'")
+                    value = current_value.merge_data(value)
+                logger.debug(f"Adding new '{key}' to config")
                 self[key] = ConfigGroup(value)
             else:
                 if not value:
                     continue
+                logger.debug(f"Setting key '{key}' to {value}")
                 self[key] = value
         return self
 
-class ConfigManager(ConfigGroup, metaclass=_Singleton):
+class ConfigManager(ConfigGroup):
     def __init__(self, default_dataclass):
         logger.debug(f"loading default values into config manager")
         self.default_dataclass = default_dataclass
@@ -123,6 +119,6 @@ class ConfigManager(ConfigGroup, metaclass=_Singleton):
                 logger.error(f"Invalid value for field: {field.name} {value} cannot convert to type {field.type.__name__}")
                 exit()
             
-ConfigManager(
+shared_config_manager = ConfigManager(
     default_dataclass=_default_configs.DefaultConfig()
 )
