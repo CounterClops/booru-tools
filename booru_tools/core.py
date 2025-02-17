@@ -86,6 +86,9 @@ class BooruTools:
         
         self.config = config.shared_config_manager
         self.tmp_directory = constants.TEMP_FOLDER
+
+        self.cleanup_temp_directories = self.config["core"]["cleanup_temp_directories"]
+
         self.session_manager = SessionManager(
             limit_per_host=self.config["networking"].get("limit_per_host", 20)
         )
@@ -161,14 +164,10 @@ class BooruTools:
 
         tasks:list[asyncio.Task] = []
         found_tags = []
-        chunk_count = 0
-        chunk_size = 50
-        total_post_count = len(posts)
-        for posts_chunk in self.divide_chunks(posts, chunk_size):
-            chunk_count += 1
-            self.log_chunk_progress(chunk=posts_chunk, chunk_count=chunk_count, total_chunk_size=total_post_count)
+        for posts_chunk in self.divide_chunks(posts, max_size=20):
+            posts_chunk:list[resources.InternalPost]
             async with asyncio.TaskGroup() as task_group:
-                for post in posts:
+                for post in posts_chunk:
                     if not post.local_file:
                         logger.debug(f"No file to upload for '{post.id}'")
                     else:
@@ -226,12 +225,7 @@ class BooruTools:
 
     async def update_tags(self, tags:list[resources.InternalTag]):
         logger.info(f"Updating {len(tags)} tags")
-        chunk_count = 0
-        chunk_size = 500
-        total_tags = len(tags)
-        for tags_chunk in self.divide_chunks(tags, chunk_size):
-            chunk_count += 1
-            self.log_chunk_progress(chunk=tags_chunk, chunk_count=chunk_count, total_chunk_size=total_tags)
+        for tags_chunk in self.divide_chunks(tags, max_size=500):
             tasks:list[asyncio.Task] = []
             async with asyncio.TaskGroup() as task_group:
                 for tag in tags_chunk:
@@ -248,8 +242,13 @@ class BooruTools:
             self.tmp_directory
         ]
 
+        if not self.cleanup_temp_directories:
+            logger.debug("Skipping cleanup of temporary directories as its disabled")
+            return None
+
         for directory in directories_to_delete:
             self.delete_directory(directory=directory)
+
         return None
     
     def delete_directory(self, directory:Path) -> None:
@@ -322,18 +321,18 @@ class BooruTools:
     
     @staticmethod
     def divide_chunks(array:list, max_size:int=50):
-        for i in range(0, len(array), max_size): 
-            yield array[i:i + max_size]
+        total_size = len(array)
+        for i in range(0, len(array), max_size):
+            new_max = i + max_size
+            chunk = array[i:new_max]
 
-    @staticmethod
-    def log_chunk_progress(chunk:list, chunk_count:int, total_chunk_size:int) -> None:
-        items_count = len(chunk)
+            chunk_size = len(chunk)
+            completion_percent = int((new_max / total_size) * 100)
+            if completion_percent > 100:
+                completion_percent = 100
+            logger.info(f"Creating chunk {i}-{new_max} ({chunk_size} of {total_size} total items) - {completion_percent}% complete")
 
-        completion_percent = int(((chunk_count * total_chunk_size) / items_count) * 100)
-        if completion_percent > 100:
-            completion_percent = 100
-        
-        logger.info(f"Processing chunk {chunk_count} {len(items_count)} of {total_chunk_size} items ({completion_percent}%)")
+            yield chunk
     
     def override_plugin_config(self, plugin:object, plugin_override:str=""):
         override_pairs = plugin_override.split(",")
