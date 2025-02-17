@@ -14,6 +14,7 @@ class DefaultCoreConfig(DefaultConfigBaseGroup):
     minimum_score:int = field(default=10)
     destination:str = field(default="szurubooru")
     add_video_metatags:bool = field(default=False)
+    cleanup_temp_directories:bool = field(default=True)
 
 ### Commands
 @dataclass(kw_only=True)
@@ -34,6 +35,7 @@ class DefaultCommandsConfig(DefaultConfigBaseGroup):
 class DefaultDownloadersGalleryDlConfig(DefaultConfigBaseGroup):
     page_size:int = field(default=50)
     allowed_blank_pages:int = field(default=1)
+    no_download:bool = field(default=False)
     extra_params:list = field(default_factory=list)
     ignored_file_extensions:list[str] = field(default_factory=lambda: [".zip"])
 

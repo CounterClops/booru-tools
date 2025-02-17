@@ -57,7 +57,7 @@ class ConfigGroup(dict):
                 logger.debug(f"Adding new '{key}' to config")
                 self[key] = ConfigGroup(value)
             else:
-                if not value:
+                if value is None:
                     continue
                 logger.debug(f"Setting key '{key}' to {value}")
                 self[key] = value
@@ -117,7 +117,8 @@ class ConfigManager(ConfigGroup):
                 )
             except (TypeError, ValueError) as e:
                 logger.error(f"Invalid value for field: {field.name} {value} cannot convert to type {field.type.__name__}")
-                exit()
+                logger.warning(f"Removing invalid field: {field.name} to avoid unexpected behavior")
+                data.pop(field.name)
             
 shared_config_manager = ConfigManager(
     default_dataclass=_default_configs.DefaultConfig()
