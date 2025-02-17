@@ -6,24 +6,24 @@ import asyncio
 import traceback
 
 from booru_tools import core
-from booru_tools.shared import resources, constants
+from booru_tools.shared import resources, constants, errors
 from booru_tools.plugins import _plugin_template
 
 class MigratePostsCommand():
     def __init__(self):
         self.blank_download_page_count = 0
     
-    async def post_init(self, 
-                destination:str, 
-                url:list[str]=[], 
-                import_site:str="", 
-                urls_file:Path=None, 
-                cookies:Path=None, 
-                blacklisted_tags:str="", 
-                required_tags:str="", 
-                allowed_blank_pages:int=1, 
-                match_source:bool=True, 
-                plugin_override:str="", 
+    async def post_init(self,
+                destination:str,
+                url:list[str]=[],
+                import_site:str="",
+                urls_file:Path=None,
+                cookies:Path=None,
+                blacklisted_tags:str="",
+                required_tags:str="",
+                allowed_blank_pages:int=1,
+                match_source:bool=True,
+                plugin_override:str="",
                 download_page_size:int=100,
                 allowed_safety:str="",
                 minimum_score:int=0
@@ -62,7 +62,7 @@ class MigratePostsCommand():
                     await self.booru_tools.update_posts(posts=posts)
                 except Exception as e:
                     logger.critical(f"url import failed with {e}")
-                    logger.critical(traceback.format_exc())
+                    logger.trace(traceback.format_exc())
                 finally:
                     job.cleanup_folders()
         
@@ -75,12 +75,28 @@ class MigratePostsCommand():
             return False
         return True
 
+    @errors.SuppressGeneratorIterationOnExceptions(
+        exceptions=[errors.NoPluginFound]
+    )
     async def download_posts_from_url(self, url:str, force_download:bool=False):
         domain:str = urlparse(url).hostname
 
-        meta_plugin:_plugin_template.MetadataPlugin = self.booru_tools.metadata_loader.load_matching_plugin(domain=domain)
-        api_plugin:_plugin_template.ApiPlugin = self.booru_tools.api_loader.load_matching_plugin(domain=domain)
-        validator_plugins:list[_plugin_template.ValidationPlugin] = self.booru_tools.validation_loader.load_all_plugins()
+        try:
+            meta_plugin:_plugin_template.MetadataPlugin = self.booru_tools.metadata_loader.load_matching_plugin(domain=domain)
+        except errors.NoPluginFound as e:
+            logger.error(f"Could not find a plugin for '{domain}' skipping import")
+            yield e
+            return
+        
+        try:
+            api_plugin:_plugin_template.ApiPlugin = self.booru_tools.api_loader.load_matching_plugin(domain=domain)
+        except errors.NoPluginFound as e:
+            api_plugin = None
+        
+        try:
+            validator_plugins:list[_plugin_template.ValidationPlugin] = self.booru_tools.validation_loader.load_all_plugins()
+        except errors.NoPluginFound as e:
+            validator_plugins = None
 
         for job in meta_plugin.DOWNLOAD_MANAGER.download(url=url):
             for item in job.download_items:
