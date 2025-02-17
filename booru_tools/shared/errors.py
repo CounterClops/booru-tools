@@ -1,4 +1,4 @@
-from typing import TypeVar, ParamSpec, Callable, Awaitable, Any
+from typing import TypeVar, ParamSpec, Callable, Awaitable, Any, Generator
 from loguru import logger
 import asyncio
 import functools
@@ -54,6 +54,7 @@ HTTP_CODE_MAP = {
 
 P = ParamSpec("P")
 R = TypeVar('R')
+Y = TypeVar('Y')
 
 def log_all_errors(func: Callable[P, Awaitable[R]], reraise_errors:bool=False) -> Callable[P, Awaitable[R]]:
     @functools.wraps(func)
@@ -63,7 +64,7 @@ def log_all_errors(func: Callable[P, Awaitable[R]], reraise_errors:bool=False) -
         except Exception as error:
             error_message = f"{error} when running {func.__name__}"
             logger.critical(error_message)
-            logger.critical(traceback.format_exc())
+            logger.trace(traceback.format_exc())
             if reraise_errors:
                 raise error
     return wrapper
@@ -74,9 +75,24 @@ def suppress_errors(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]
         try:
             return await func(*args, **kwargs)
         except Exception as error:
-            error_message = f"Supressing {error} when running {func.__name__}"
+            error_message = f"Suppressing {error} when running {func.__name__}"
             logger.warning(error_message)
     return wrapper
+
+class SuppressGeneratorIterationOnExceptions:
+    def __init__(self, exceptions:list[Exception]):
+        self.exceptions = tuple(exceptions)
+
+    def __call__(self, func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+        @functools.wraps(func)
+        async def wrapper(*args: Any, **kwargs: Any) -> Y:
+            async for item in func(*args, **kwargs):
+                return_type = type(item)
+                if type(item) in self.exceptions:
+                    logger.warning(f"Suppressing {return_type.__qualname__} when running {func.__name__}")
+                    continue
+                yield item
+        return wrapper
 
 class RetryOnExceptions:
     def __init__(self, exceptions:list[Exception]=[GatewayTimeout, ServiceUnavailable, TooManyRequestsError], wait_time:int=30, retry_limit:int=6):
@@ -106,8 +122,9 @@ class RetryOnExceptions:
                     except Conflict as e:
                         logger.warning(f"HTTP Conflict error when calling {func.__name__}, due to '{e}'")
                         logger.debug(f"Stopping retry attempts as this is a HTTP conflict error")
+                        return None
                 logger.error(f"Retry limit reached when calling {func.__name__}, due to '{e}'")
                 logger.debug(f"Failure limit was reached when calling {func.__name__}, with args={args}, kwargs={kwargs}")
-                logger.debug(traceback.format_exc())
+                logger.trace(traceback.format_exc())
                 raise e
         return wrapper
