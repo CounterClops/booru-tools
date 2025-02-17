@@ -220,14 +220,14 @@ class SzurubooruErrorHandler:
                         raise szurubooru_error_class(f"Failed to decode error message. Full response text is '{error.message}'")
                     logger.warning(f"Failed to decode error message. Full response text is '{error.message}'")
                     logger.warning(f"Running {func.__name__} and provided the arguments args='{args}' and kwargs='{kwargs}'")
-                    logger.debug(traceback.format_exc())
+                    logger.trace(traceback.format_exc())
                     raise error
                 except KeyError as e:
                     logger.critical(f"Encountered unknown aiohttp error '{e}'")
                     raise error
             except Exception as error:
                 logger.error(f"Encountered unexpected error '{error}' in {func.__name__}")
-                logger.error(traceback.format_exc())
+                logger.trace(traceback.format_exc())
                 raise error
         return wrapper
 
@@ -1541,7 +1541,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                     ) as response:
                     try:
                         response_json = await response.json()
-                        logger.info(f"Uploaded file '{file}' to temporary endpoint")
+                        logger.debug(f"Uploaded file '{file}' to temporary endpoint")
                     except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
                         err.message = await response.text()
                         raise err

@@ -17,7 +17,7 @@ class InternalPlugin:
     obj: _base.PluginBase
 
     def __str__(self) -> str:
-        return f"Plugin: {self.obj.__class__.__name__} ({self.module_name})"
+        return f"{self.name} ({self.module_name})"
     
     def __call__(self, *args, **kwargs):
         logger.debug(f"Calling '{self}'")
@@ -65,7 +65,7 @@ class PluginLoader:
             # Find classes in the module that are subclasses of `self.plugin_class`
             for name, obj in inspect.getmembers(module, inspect.isclass):
                 if issubclass(obj, self.plugin_class) and obj != self.plugin_class:
-                    logger.debug(f"Loaded plugin '{name}' of type '{self.plugin_class}'")
+                    logger.debug(f"Loaded plugin '{name}' of type '{self.plugin_class.__qualname__}'")
                     plugin = InternalPlugin(
                         name=name,
                         module_name=module_name,
@@ -100,7 +100,7 @@ class PluginLoader:
         Returns:
             InternalPlugin: The first plugin to match the desired conditions
         """
-        logger.debug(f"Searching {len(self.plugins)} {self.plugin_class.__class__.__name__} plugins for domain={domain}, category={category}")
+        logger.debug(f"Searching {len(self.plugins)} {self.plugin_class.__qualname__} plugins for domain={domain}, category={category}")
 
         for plugin in self.plugins:
             try:
@@ -135,7 +135,7 @@ class PluginLoader:
     
     @functools.cache
     def load_matching_plugin(self, name:str="", domain:str="", category:str="") -> _base.PluginBase:
-        logger.debug(f"Starting search for {self.plugin_class.__class__.__name__} plugin with domain={domain}, category={category}")
+        logger.debug(f"Starting search for {self.plugin_class.__qualname__} plugin with domain={domain}, category={category}")
 
         try:
             plugin:InternalPlugin = self.find_plugin(
@@ -145,12 +145,12 @@ class PluginLoader:
             )
         except errors.NoPluginFound as e:
             logger.debug(f"Couldn't find a matching plugin with ({e})")
-            return None
+            raise errors.NoPluginFound
 
         if plugin:
             loaded_plugin = self.initialise_plugin(plugin=plugin)
             return loaded_plugin
-        return None
+        raise errors.NoPluginFound
 
     @functools.cache
     def load_all_plugins(self) -> list[_base.PluginBase]:

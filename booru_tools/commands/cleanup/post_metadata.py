@@ -30,7 +30,7 @@ class CleanupPostMetadataCommand(MigratePostsCommand):
                     await self.booru_tools.update_posts(posts=posts)
                 except Exception as e:
                     logger.critical(f"url import failed with {e}")
-                    logger.critical(traceback.format_exc())
+                    logger.trace(traceback.format_exc())
                 finally:
                     job.cleanup_folders()
         
