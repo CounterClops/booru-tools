@@ -648,6 +648,9 @@ class SzurubooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
 
     def get_sources(self, metadata:dict) -> list[str]:
         source:str = metadata['source']
+        if not source:
+            logger.warning(f"Post {metadata['id']} has no source")
+            return []
         sources = source.split("\n")
         return sources
 
