@@ -1,4 +1,4 @@
-from typing import TypeVar, ParamSpec, Callable, Awaitable, Any, Generator
+from typing import TypeVar, ParamSpec, Callable, Awaitable, Any, Generator, AsyncIterable
 from loguru import logger
 import asyncio
 import functools
@@ -83,7 +83,7 @@ class SuppressGeneratorIterationOnExceptions:
     def __init__(self, exceptions:list[Exception]):
         self.exceptions = tuple(exceptions)
 
-    def __call__(self, func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+    def __call__(self, func: Callable[P, AsyncIterable[R]]) -> Callable[P, AsyncIterable[R]]:
         @functools.wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> Y:
             async for item in func(*args, **kwargs):
