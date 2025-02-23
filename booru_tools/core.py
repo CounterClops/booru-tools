@@ -196,7 +196,17 @@ class BooruTools:
                     )
                     tasks.append(task)
             results = [task.result() for task in tasks]
+        
         filtered_tags = self.filter_tags(tags=found_tags)
+        
+        if not filtered_tags:
+            logger.debug("No tags require potential updating")
+            return None
+        
+        if not self.config["core"]["update_tag_categories"]:
+            logger.info("Tag category updates disabled, skipping")
+            return
+        
         logger.info(f"Updating tags for {len(filtered_tags)} tags")
         await self.update_tags(tags=filtered_tags)
 
