@@ -87,6 +87,38 @@ class Thumbnails:
                 return value
         return None
 
+class ImageResolutionTags:
+    class ResolutionGroup:
+        def __init__(self, name:str, width:int, height:int, comparison:str):
+            self.name = name
+            self.width = width
+            self.height = height
+            self.comparison = comparison
+
+    THUMBNAIL = ResolutionGroup(name="thumbnail", width=250, height=250, comparison="lower")
+    LOW_RES = ResolutionGroup(name="low_res", width=500, height=500, comparison="lower")
+    HI_RES = ResolutionGroup(name="hi_res", width=1600, height=1200, comparison="higher")
+    ABSURD_RES = ResolutionGroup(name="absurb_res", width=3200, height=2400, comparison="higher")
+    SUPERABSURD_RES = ResolutionGroup(name="superabsurb_res", width=10000, height=10000, comparison="higher")
+
+    @classmethod
+    def get_tag_strings(cls, height:int, width:int) -> list[str]:
+        tags = []
+        for name, resolution_group in vars(cls).items():
+            if not isinstance(resolution_group, cls.ResolutionGroup):
+                continue
+            if resolution_group.comparison == "lower":
+                under_max_height = height <= resolution_group.height
+                under_max_width = width <= resolution_group.width
+                if under_max_height or under_max_width:
+                    tags.append(resolution_group.name)
+            elif resolution_group.comparison == "higher":
+                over_min_height = height >= resolution_group.height
+                over_min_width = width >= resolution_group.width
+                if over_min_height or over_min_width:
+                    tags.append(resolution_group.name)
+        return tags
+
 class Singleton(type):
     _instances = {}
     def __call__(cls, *args, **kwargs):
