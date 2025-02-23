@@ -60,13 +60,28 @@ class FFmpeg:
 
         if config_manager["tools"]["ffmpeg"]["create_basic_video_tags"]:
             logger.debug(f"Generating audio/video tags for {ffmpeg_json['format']['filename']}")
-            post.tags.extend(cls._generate_audio_tags(ffmpeg_json))
+
+            post.tags.extend(
+                cls._generate_audio_tags(ffmpeg_json)
+            )
+            post.tags.extend(
+                cls._generate_video_framerate_tags(ffmpeg_json)
+            )
+            post.tags.extend(
+                cls._generate_video_resolution_tags(ffmpeg_json)
+            )
+
             post.tags.append(resources.InternalTag(names=["video"], category=constants.TagCategory.META))
 
         if config_manager["tools"]["ffmpeg"]["create_duration_tags"]:
             logger.debug(f"Generating video duration tags for {ffmpeg_json['format']['filename']}")
             duration_tags = cls._generate_video_duration_tags(ffmpeg_json)
             post.tags.extend(duration_tags)
+
+        if config_manager["tools"]["ffmpeg"]["create_ffmpeg_processed_tag"]:
+            post.tags.append(
+                resources.InternalTag(names=["ffmpeg_processed"], category=constants.TagCategory.META)
+            )
 
         return post
 
@@ -133,6 +148,44 @@ class FFmpeg:
             duration_tags.append(tag)
 
         return duration_tags
+    
+    @classmethod
+    def _generate_video_framerate_tags(cls, ffmpeg_json:dict) -> list[resources.InternalTag]:
+        video_stream = cls._get_primary_video_stream(ffmpeg_json)
+        avg_frame_rate = video_stream.get("avg_frame_rate", "30/1")
+        framerate = int(avg_frame_rate.split("/")[0])
+        if framerate >= 48:
+            tags = [
+                resources.InternalTag(names=["high_framerate"], category=constants.TagCategory.META)
+            ]
+            return tags
+        return []
+
+    @classmethod
+    def _generate_video_resolution_tags(cls, ffmpeg_json:dict) -> list[resources.InternalTag]:
+        tags = []
+        video_stream = cls._get_primary_video_stream(ffmpeg_json)
+        height = video_stream.get("height", 0)
+        width = video_stream.get("width", 0)
+
+        if height == 0 or width == 0:
+            return tags
+        
+        for tag_string in constants.ImageResolutionTags.get_tag_strings(height=height, width=width):
+            tags.append(
+                resources.InternalTag(names=[tag_string], category=constants.TagCategory.META)
+            )
+        return tags
+
+    @staticmethod
+    def _get_primary_video_stream(ffmpeg_json:dict[str, list[dict]]) -> dict:
+        video_streams = [
+            stream 
+            for stream in ffmpeg_json["streams"] 
+            if stream.get("codec_type", "unknown") == "video"
+        ]
+        primary_video_stream = video_streams[0]
+        return primary_video_stream
 
     @classmethod
     def _check_file_supported(cls, file:Path) -> bool:
