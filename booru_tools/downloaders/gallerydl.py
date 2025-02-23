@@ -19,6 +19,7 @@ class GalleryDlManager(_base.DownloadManager):
         self.page_size:int = config_manager["downloaders"]["gallery_dl"]["page_size"]
         self.allowed_blank_pages:int = config_manager["downloaders"]["gallery_dl"]["allowed_blank_pages"]
         self.ignored_file_extensions:list[str] = config_manager["downloaders"]["gallery_dl"]["ignored_file_extensions"]
+        self.no_download:list[str] = config_manager["downloaders"]["gallery_dl"]["no_download"]
 
         if cookies_file:
             logger.debug(f"Using cookies file '{cookies_file}'")
@@ -72,6 +73,10 @@ class GalleryDlManager(_base.DownloadManager):
                 logger.warning(f"Resource {item.resource} does not have a post_url, using {item._download_override} instead")
                 item.download_url = item._download_override
         
+        if self.no_download:
+            logger.debug("No download flag is set, skipping download")
+            return job
+        
         for item in job.items_pending_download():
             file_to_download = item.metadata_file.parent / item.metadata_file.stem
             if file_to_download.suffix in self.ignored_file_extensions:
@@ -90,6 +95,8 @@ class GalleryDlManager(_base.DownloadManager):
             if item.download_url:
                 download_url = self.add_extractor_to_url(item.download_url)
                 urls.append(download_url)
+            
+            self._downloaded_links.append(item.download_url)
 
         if not urls:
             logger.debug("No media files to download")
@@ -101,7 +108,6 @@ class GalleryDlManager(_base.DownloadManager):
             *urls
         ]
         self.call_gallerydl(params)
-        self._downloaded_links.extend(urls)
 
         for item in job.download_items:
             if not item.media_download_desired:
@@ -167,13 +173,13 @@ class GalleryDlManager(_base.DownloadManager):
         ]
 
         new_items_found = bool(new_items)
-        if self.allowed_blank_pages == 0:
-            logger.debug(f"Allowed_blank_pages is set to 0, new items found equal {new_items_found}")
+        if self.allowed_blank_pages == 0 or self.no_download:
+            logger.debug(f"Download check disabled, new items found equal {new_items_found}")
             return new_items_found
-        
         
         logger.debug(f"Checking if download should continue")
         if not new_items_found:
+            logger.debug(f"No new items found, download should not continue")
             return False
         
         is_any_pending_downloads = bool(items_pending_download)
