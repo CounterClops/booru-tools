@@ -59,7 +59,7 @@ class GelbooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
         return sources
     
     def get_score(self, metadata:dict) -> int:
-        score:int = metadata.get("score", 0)
+        score:int = int(metadata.get("score", 0))
         return score
 
     def get_tags(self, metadata:dict[str, any]) -> list[resources.InternalTag]:
