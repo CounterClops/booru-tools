@@ -6,8 +6,6 @@ import asyncio
 import traceback
 
 from booru_tools import core
-from booru_tools.shared import resources, constants
-from booru_tools.plugins import _plugin_template
 from booru_tools.commands.migrate.posts import MigratePostsCommand
 
 class CleanupPostMetadataCommand(MigratePostsCommand):
