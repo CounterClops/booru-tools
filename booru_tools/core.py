@@ -9,6 +9,7 @@ import hashlib
 import asyncio
 import aiohttp
 import signal
+import traceback
 
 from booru_tools.loaders import plugin_loader
 from booru_tools.plugins import _plugin_template
@@ -161,10 +162,9 @@ class BooruTools:
 
     async def update_posts(self, posts:list[resources.InternalPost]):
         logger.info(f"Updating {len(posts)} posts")
-
-        tasks:list[asyncio.Task] = []
         found_tags = []
         for posts_chunk in self.divide_chunks(posts, max_size=20):
+            tasks:list[asyncio.Task] = []
             posts_chunk:list[resources.InternalPost]
             async with asyncio.TaskGroup() as task_group:
                 for post in posts_chunk:
@@ -175,7 +175,11 @@ class BooruTools:
                         post = self.add_missing_post_hashes(post=post)
                     
                     if self.config["core"]["add_video_metatags"]:
-                        post = FFmpeg.add_video_tags(post=post)
+                        try:
+                            post = FFmpeg.add_video_tags(post=post)
+                        except Exception as e:
+                            logger.error(f"Error adding video tags to '{post.id}' with {e}")
+                            logger.trace(traceback.format_exc())
 
                     if post.post_url:
                         if post.post_url not in post.sources:
