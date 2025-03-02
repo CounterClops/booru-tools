@@ -96,7 +96,7 @@ class GalleryDlManager(_base.DownloadManager):
                 download_url = self.add_extractor_to_url(item.download_url)
                 urls.append(download_url)
             
-            self._downloaded_links.append(item.download_url)
+            job._downloaded_links.append(item.download_url)
 
         if not urls:
             logger.debug("No media files to download")
@@ -136,7 +136,12 @@ class GalleryDlManager(_base.DownloadManager):
 
         return job
 
-    def download(self, url:str) -> Generator[_base.DownloadJob, None, None]:
+    def download(self, url:str, skip_every_second_page:bool=False) -> Generator[_base.DownloadJob, None, None]:
+        if skip_every_second_page:
+            offset_increment = self.page_size
+        else:
+            offset_increment = 0
+
         min_range = 0
         max_range = self.page_size
 
@@ -156,12 +161,14 @@ class GalleryDlManager(_base.DownloadManager):
 
             job = self.create_download_job(params)
 
-            min_range = max_range + 1
-            max_range += self.page_size
+            min_range = max_range + 1 + offset_increment
+            max_range += self.page_size + offset_increment
             
             yield job
             continue_download = self._check_continue_download(job)
+            self._downloaded_links.extend(job._downloaded_links)
         
+        self._downloaded_links = []
         return
     
     def _check_continue_download(self, job:_base.DownloadJob) -> bool:

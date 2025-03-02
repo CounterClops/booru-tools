@@ -78,7 +78,7 @@ class MigratePostsCommand():
     @errors.SuppressGeneratorIterationOnExceptions(
         exceptions=[errors.NoPluginFound]
     )
-    async def download_posts_from_url(self, url:str, force_download:bool=False):
+    async def download_posts_from_url(self, url:str, force_download:bool=False, skip_every_second_page:bool=False):
         domain:str = urlparse(url).hostname
 
         try:
@@ -98,7 +98,7 @@ class MigratePostsCommand():
         except errors.NoPluginFound as e:
             validator_plugins = None
 
-        for job in meta_plugin.DOWNLOAD_MANAGER.download(url=url):
+        for job in meta_plugin.DOWNLOAD_MANAGER.download(url=url, skip_every_second_page=skip_every_second_page):
             for item in job.download_items:
                 plugins = resources.InternalPlugins(
                     api=api_plugin,

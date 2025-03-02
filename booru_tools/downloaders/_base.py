@@ -23,6 +23,7 @@ class DownloadJob:
     download_folder:Path = field(compare=True)
     download_items:list[DownloadItem] = field(default_factory=list)
     _download_manager:DownloadManager = field(repr=False, default=None)
+    _downloaded_links:list[str] = field(default_factory=list)
 
     def download_media(self) -> None:
         self._download_manager.download_pending_items(job=self)

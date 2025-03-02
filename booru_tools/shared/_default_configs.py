@@ -16,6 +16,7 @@ class DefaultCoreConfig(DefaultConfigBaseGroup):
     add_video_metatags:bool = field(default=False, metadata={"description": "Whether to add video metadata tags to posts using ffmpeg"})
     cleanup_temp_directories:bool = field(default=True, metadata={"description": "Whether to cleanup temporary directories after running"})
     update_tag_categories:bool = field(default=True, metadata={"description": "Whether to update tag categories"})
+    skip_every_second_page:bool = field(default=False, metadata={"description": "Whether to skip every second page when downloading"})
 
 ### Commands
 @dataclass(kw_only=True)
