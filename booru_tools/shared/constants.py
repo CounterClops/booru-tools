@@ -1,4 +1,5 @@
 from pathlib import Path
+from fractions import Fraction
 
 ROOT_FOLDER = Path(__file__).parent.parent
 TEMP_FOLDER = Path("tmp")
@@ -98,8 +99,8 @@ class ImageResolutionTags:
     THUMBNAIL = ResolutionGroup(name="thumbnail", width=250, height=250, comparison="lower")
     LOW_RES = ResolutionGroup(name="low_res", width=500, height=500, comparison="lower")
     HI_RES = ResolutionGroup(name="hi_res", width=1600, height=1200, comparison="higher")
-    ABSURD_RES = ResolutionGroup(name="absurb_res", width=3200, height=2400, comparison="higher")
-    SUPERABSURD_RES = ResolutionGroup(name="superabsurb_res", width=10000, height=10000, comparison="higher")
+    ABSURD_RES = ResolutionGroup(name="absurd_res", width=3200, height=2400, comparison="higher")
+    SUPERABSURD_RES = ResolutionGroup(name="superabsurd_res", width=10000, height=10000, comparison="higher")
 
     @classmethod
     def get_tag_strings(cls, height:int, width:int) -> list[str]:
@@ -117,7 +118,17 @@ class ImageResolutionTags:
                 over_min_width = width >= resolution_group.width
                 if over_min_height or over_min_width:
                     tags.append(resolution_group.name)
+        
+        aspect_ratio = cls.get_aspect_ratio(height, width)
+        tags.append(f"{aspect_ratio[0]}:{aspect_ratio[1]}")
         return tags
+
+    @staticmethod
+    def get_aspect_ratio(height:int, width:int) -> tuple[int, int]:
+        ratio = Fraction(width, height).limit_denominator()
+        width_ratio = ratio.numerator
+        height_ratio = ratio.denominator
+        return [width_ratio, height_ratio]
 
 class Singleton(type):
     _instances = {}

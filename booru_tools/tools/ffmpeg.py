@@ -2,6 +2,7 @@ from pathlib import Path
 from loguru import logger
 import subprocess
 import json
+import re
 
 from booru_tools.shared import resources, constants, config
 
@@ -36,33 +37,18 @@ class FFmpeg:
             logger.warning(f"FFmpeg is not installed, unable to create video tags")
             return post
         
-        command = [
-            "ffprobe",
-            "-v", "quiet",
-            "-print_format", "json",
-            "-show_format",
-            "-show_streams",
-            str(post.local_file.absolute())
-        ]
-
-        command_output = subprocess.run(
-            command,
-            capture_output=True,
-            encoding='utf-8'
-        )
-
-        if command_output.returncode != 0:
-            logger.error(f"Failed to run command {command}")
+        try:
+            ffmpeg_json = cls._get_ffmpeg_json(file=post.local_file)
+        except Exception as e:
+            logger.error(f"Failed to get ffmpeg json for {post.local_file} with {e}")
             return post
-        
-        logger.debug(f"Loading JSON from ffprobe output")
-        ffmpeg_json = json.loads(command_output.stdout)
 
         if config_manager["tools"]["ffmpeg"]["create_basic_video_tags"]:
             logger.debug(f"Generating audio/video tags for {ffmpeg_json['format']['filename']}")
 
+            post = cls._remove_existing_audio_tags(post)
             post.tags.extend(
-                cls._generate_audio_tags(ffmpeg_json)
+                cls._generate_audio_tags(ffmpeg_json, file=post.local_file)
             )
             post.tags.extend(
                 cls._generate_video_framerate_tags(ffmpeg_json)
@@ -86,7 +72,100 @@ class FFmpeg:
         return post
 
     @classmethod
-    def _generate_audio_tags(cls, ffmpeg_json:dict) -> list[resources.InternalTag]:
+    def _get_ffmpeg_json(cls, file:Path) -> dict:
+        ffmpeg_json = cls._extract_ffmpeg_json(file=file)
+        try:
+            if cls._validate_ffmpeg_json(ffmpeg_json):
+                return ffmpeg_json
+        except KeyError:
+            logger.error(f"Failed to validate ffmpeg json for original file {file.name}")
+        
+        new_file = cls._remux_file(file=file.absolute())
+        ffmpeg_json = cls._extract_ffmpeg_json(file=new_file)
+        if cls._validate_ffmpeg_json(ffmpeg_json):
+            return ffmpeg_json
+
+    @classmethod
+    def _remux_file(cls, file:Path) -> Path:
+        new_file = Path(file.parent.absolute() / file.with_suffix(".remux.mkv"))
+        logger.info(f"Remuxing file {file.name} to {new_file.name} to extract metadata")
+        remux_command = [
+            "ffmpeg",
+            "-i", str(file),
+            "-c", "copy",
+            "-y",
+            str(new_file)
+        ]
+
+        command_output = subprocess.run(
+            remux_command,
+            capture_output=True,
+            encoding='utf-8'
+        )
+        
+        if command_output.returncode != 0:
+            logger.error(f"Failed to run remux command {remux_command}")
+            raise Exception(f"Failed to run command {remux_command} with {command_output.stderr}")
+
+        return new_file
+    
+    @classmethod
+    def _extract_ffmpeg_json(cls, file:Path) -> dict:
+        command_base = [
+            "ffprobe",
+            "-v", "quiet",
+            "-print_format", "json",
+            "-show_format",
+            "-show_streams"
+        ]
+
+        extract_command = [
+            *command_base,
+            str(file.absolute())
+        ]
+
+        command_output = subprocess.run(
+            extract_command,
+            capture_output=True,
+            encoding='utf-8'
+        )
+
+        if command_output.returncode != 0:
+            logger.error(f"Failed to run command {extract_command} with {command_output.stdout}")
+            raise Exception(f"Failed to run command {extract_command} ")
+        
+        logger.debug(f"Loading JSON from ffprobe output")
+        ffmpeg_json = json.loads(command_output.stdout)
+        return ffmpeg_json
+
+    @classmethod
+    def _validate_ffmpeg_json(cls, ffmpeg_json:dict) -> bool:
+        try:
+            ffmpeg_json["format"]["duration"]
+            ffmpeg_json["streams"]
+        except KeyError as e:
+            logger.debug(f"Failed to validate ffmpeg json {ffmpeg_json} with {e}")
+            raise KeyError
+        
+        return True
+    
+    @staticmethod
+    def _remove_existing_audio_tags(post:resources.InternalPost) -> resources.InternalPost:
+        ffmpeg_tags = [
+            "sound", 
+            "no_sound"
+        ]
+
+        for tag in post.tags:
+            for tag_name in tag.names:
+                if tag_name in ffmpeg_tags:
+                    post.tags.remove(tag)
+        
+        return post
+        
+
+    @classmethod
+    def _generate_audio_tags(cls, ffmpeg_json:dict, file:Path) -> list[resources.InternalTag]:
         logger.debug(f"Generating audio tags for {ffmpeg_json['format']['filename']}")
         audio_tags = []
         
@@ -99,16 +178,58 @@ class FFmpeg:
         audio_stream_count = len(audio_streams)
         if audio_stream_count > 0:
             logger.debug(f"Found {audio_stream_count} audio streams")
-            audio_tags.append(resources.InternalTag(names=["sound"], category=constants.TagCategory.META))
+            if cls._check_for_audible_sound(file):
+                audio_tags.append(resources.InternalTag(names=["sound"], category=constants.TagCategory.META))
+            else:
+                audio_tags.append(resources.InternalTag(names=["no_sound"], category=constants.TagCategory.META))
         else:
             logger.debug(f"Found no audio streams")
             audio_tags.append(resources.InternalTag(names=["no_sound"], category=constants.TagCategory.META))
 
         return audio_tags
 
+    @staticmethod
+    def _check_for_audible_sound(file:Path) -> bool:
+        logger.debug(f"Checking for audible sound in {file.name}")
+        command = [
+            "ffmpeg", "-i", str(file.absolute()), "-af", "volumedetect", "-hide_banner", "-vn", "-sn", "-dn", "-f", "null", "/dev/null"
+        ]
+
+        command_output = subprocess.run(
+            command,
+            capture_output=True,
+            encoding='utf-8'
+        )
+
+        if command_output.returncode != 0:
+            logger.error(f"Failed to run command {command}")
+            raise Exception(f"Failed to run command {command}")
+
+        # Parse the output to find mean_volume and max_volume
+        mean_volume = re.search(r'mean_volume: ([\-\d.]+) dB', command_output.stderr)
+        max_volume = re.search(r'max_volume: ([\-\d.]+) dB', command_output.stderr)
+
+        if mean_volume and max_volume:
+            mean_volume = float(mean_volume.group(1))
+            max_volume = float(max_volume.group(1))
+        else:
+            logger.warning(f"Could not detect volume for {file.name}")
+            return False
+
+        logger.debug(f"mean_volume: {mean_volume}, max_volume: {max_volume}")
+        audio_threshold = -30
+        if mean_volume < audio_threshold and max_volume < audio_threshold:
+            logger.info(f"Audio track found in {file.name}, but audio is likely silent as {mean_volume} under the threshold of {audio_threshold}")
+            return False
+        
+        logger.debug(f"Audio track found in {file.name} with mean volume {mean_volume} and max volume {max_volume}")
+        return True
+
+
     @classmethod
     def _generate_video_duration_tags(cls, ffmpeg_json:dict) -> list[resources.InternalTag]:
         logger.debug(f"Generating duration tags for {ffmpeg_json['format']['filename']}")
+
         duration = int(
             float(ffmpeg_json["format"]["duration"])
         )
@@ -194,10 +315,10 @@ class FFmpeg:
     
     @classmethod
     def _check_ffmpeg_installed(cls) -> bool:
-        command = ["ffprobe", "-version"]
+        ffprobe_command = ["ffprobe", "-version"]
         try:
-            command_output = subprocess.run(
-                command,
+            ffprobe_command_output = subprocess.run(
+                ffprobe_command,
                 capture_output=True,
                 encoding='utf-8'
             )
@@ -205,4 +326,21 @@ class FFmpeg:
             return False
 
         logger.debug(f"Confirmed ffprobe installed")
-        return command_output.returncode == 0
+
+        ffmpeg_installed = ffprobe_command_output.returncode == 0
+
+        ffmpeg_command = ["ffmpeg", "-version"]
+        try:
+            ffmpeg_command_output = subprocess.run(
+                ffmpeg_command,
+                capture_output=True,
+                encoding='utf-8'
+            )
+        except FileNotFoundError:
+            return False
+
+        logger.debug(f"Confirmed ffmpeg installed")
+
+        ffmpeg_installed = ffmpeg_command_output.returncode == 0
+
+        return ffmpeg_installed and ffmpeg_installed
