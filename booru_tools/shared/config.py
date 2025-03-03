@@ -1,7 +1,7 @@
 from pathlib import Path
 from loguru import logger
 from typing import Any
-from dataclasses import asdict, fields
+from dataclasses import asdict, fields, is_dataclass
 
 import yaml
 import os
@@ -64,7 +64,7 @@ class ConfigGroup(dict):
         return self
 
 class ConfigManager(ConfigGroup):
-    def __init__(self, default_dataclass):
+    def __init__(self, default_dataclass, load_envars=False):
         logger.debug(f"loading default values into config manager")
         self.default_dataclass = default_dataclass
         self.merge_data(asdict(default_dataclass))
@@ -72,12 +72,44 @@ class ConfigManager(ConfigGroup):
         logger.debug(f"loading config file if present")
         config_file = self._find_default_config_file()
         self._load_config_file(config_file)
+        
+        if load_envars:
+            self._load_envars()
 
         self._validate_config(data=self, default_dataclass=self.default_dataclass)
 
     def _load_config_file(self, config_file:Path):
         if config_file.suffix == ".yaml":
             self._load_yaml(config_file)
+    
+    def _load_envars(self):
+        config = {}
+
+        envar_map = self._get_envar_keys(dataclass=self.default_dataclass)
+        for envar_key, envar_type in envar_map.items():
+            envar_value = os.getenv(envar_key)
+            if envar_value is None:
+                continue
+
+            logger.debug(f"Found envar: {envar_key} with value: {envar_value}")
+
+            envar_key_path = envar_key.lower().split("__")
+            nested_config = config
+            for envar_key in envar_key_path[:-1]:
+                try:
+                    nested_config = nested_config[envar_key]
+                except KeyError as e:
+                    nested_config[envar_key] = {}
+                    nested_config = nested_config[envar_key]
+
+            if envar_type == list:
+                envar_value = envar_value.split(",")
+            elif envar_type == bool:
+                envar_value = envar_value.lower() in ["true", "1", "yes"]
+            
+            nested_config[envar_key_path[-1]] = envar_type(envar_value)
+        
+        self.merge_data(config)
 
     def _find_default_config_file(self) -> Path:
         config_file = Path("config.yaml")
@@ -87,14 +119,29 @@ class ConfigManager(ConfigGroup):
 
     def _load_yaml(self, config_file:Path):
         logger.debug(f"loading config file: {config_file}")
-        if not os.path.exists(config_file):
+        if not config_file.exists():
             raise FileNotFoundError(f"Config file not found: {config_file}")
         with open(config_file, 'r', encoding='utf-8') as f:
             data = yaml.safe_load(f)
         
         self.merge_data(data)
     
-    def _validate_config(self, data:dict, default_dataclass:_default_configs.DefaultConfigBaseGroup):
+    @classmethod
+    def _get_envar_keys(cls, dataclass:_default_configs.DefaultConfigBaseGroup) -> dict[str, type]:
+        envar_map = {}
+        for field in fields(dataclass):
+            field_name = field.name.upper()
+            if is_dataclass(field.type):
+                child_envar_keys = cls._get_envar_keys(dataclass=field.type())
+                for envar_key, envar_type in child_envar_keys.items():
+                    envar_map[f"{field_name}__{envar_key}"] = envar_type
+                continue
+            key_name = field.name.upper()
+            envar_map[key_name] = field.type
+        return envar_map
+
+    @classmethod
+    def _validate_config(cls, data:dict, default_dataclass:_default_configs.DefaultConfigBaseGroup):
         data_keys = data.keys()
         for field in fields(default_dataclass):
             try:
@@ -104,7 +151,7 @@ class ConfigManager(ConfigGroup):
 
             if isinstance(value, dict):
                 logger.debug(f"validating nested config: {field.name}")
-                self._validate_config(data=value, default_dataclass=field.type)
+                cls._validate_config(data=value, default_dataclass=field.type)
                 continue
             
             if field.name not in data_keys:
@@ -119,7 +166,8 @@ class ConfigManager(ConfigGroup):
                 logger.error(f"Invalid value for field: {field.name} {value} cannot convert to type {field.type.__name__}")
                 logger.warning(f"Removing invalid field: {field.name} to avoid unexpected behavior")
                 data.pop(field.name)
-            
+
 shared_config_manager = ConfigManager(
-    default_dataclass=_default_configs.DefaultConfig()
+    default_dataclass=_default_configs.DefaultConfig(),
+    load_envars=True
 )
