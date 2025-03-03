@@ -29,11 +29,24 @@ class GalleryDlManager(_base.DownloadManager):
             ])
     
     def add_extractor_to_url(self, url:str) -> str:
+        """Add the explicit extractor to the url if it's not already present
+
+        Args:
+            url (str): The url to prepend the extractor to
+
+        Returns:
+            str: The url with the extractor prepended
+        """
         if self.extractor and not url.startswith(self.extractor):
             url = f"{self.extractor}:{url}"
         return url
 
     def call_gallerydl(self, params:list = []) -> None:
+        """Call gallery-dl with the given parameters
+
+        Args:
+            params (list, optional): The list of params to provide gallery-dl. Defaults to [].
+        """
         command = [
             "gallery-dl",
             *self.extra_params,
@@ -44,6 +57,15 @@ class GalleryDlManager(_base.DownloadManager):
         return None
     
     def download_info(self, urls:list[str], download_directory:Path) -> list[_base.DownloadItem]:
+        """Download the metadata for the given urls, without downloading the media files
+
+        Args:
+            urls (list[str]): The urls to download metadata for
+            download_directory (Path): The directory to download the metadata to
+
+        Returns:
+            list[_base.DownloadItem]: The list of DownloadItems created from the downloaded metadata
+        """
         params = [
             "--write-metadata", 
             "--no-download",
@@ -64,6 +86,14 @@ class GalleryDlManager(_base.DownloadManager):
         return items
 
     def download_pending_items(self, job:_base.DownloadJob) -> _base.DownloadJob:
+        """Download the media files for the given job, that have been marked as desired
+
+        Args:
+            job (_base.DownloadJob): The job to download media files for
+
+        Returns:
+            _base.DownloadJob: The job with the media files downloaded
+        """
         urls = []
 
         for item in job.download_items:
@@ -125,6 +155,14 @@ class GalleryDlManager(_base.DownloadManager):
         return job
 
     def create_download_job(self, params:list) -> _base.DownloadJob:
+        """Create a download job from the given parameters
+
+        Args:
+            params (list): The parameters to pass to gallery-dl
+
+        Returns:
+            _base.DownloadJob: The created download job
+        """
         temp_folder = self.create_temp_folder()
         download_items = self.download_info(params, temp_folder)
         
@@ -137,6 +175,15 @@ class GalleryDlManager(_base.DownloadManager):
         return job
 
     def download(self, url:str, skip_every_second_page:bool=False) -> Generator[_base.DownloadJob, None, None]:
+        """Download the media files from the given url using gallery-dl through a generator function
+
+        Args:
+            url (str): The url to download media files from
+            skip_every_second_page (bool, optional): Whether each second page should be skipped, can be useful if the download/uploads are going to the same site. Defaults to False.
+
+        Yields:
+            Generator[_base.DownloadJob, None, None]: The download job for the given url
+        """
         if skip_every_second_page:
             offset_increment = self.page_size
         else:
@@ -172,6 +219,14 @@ class GalleryDlManager(_base.DownloadManager):
         return
     
     def _check_continue_download(self, job:_base.DownloadJob) -> bool:
+        """Check if the download should continue based on the given job
+
+        Args:
+            job (_base.DownloadJob): The job to check if the download should continue
+
+        Returns:
+            bool: Whether the download should continue
+        """
         items_pending_download = job.items_pending_download()
 
         new_items = [

@@ -73,6 +73,14 @@ class FFmpeg:
 
     @classmethod
     def _get_ffmpeg_json(cls, file:Path) -> dict:
+        """Get the ffmpeg json for a supported media file, remuxing if necessary
+
+        Args:
+            file (Path): The media file to extract metadata from through ffmpeg/ffprobe
+
+        Returns:
+            dict: The ffmpeg json output of the provided file
+        """
         ffmpeg_json = cls._extract_ffmpeg_json(file=file)
         try:
             if cls._validate_ffmpeg_json(ffmpeg_json):
@@ -87,6 +95,17 @@ class FFmpeg:
 
     @classmethod
     def _remux_file(cls, file:Path) -> Path:
+        """Remux the provided media file to another container format
+
+        Args:
+            file (Path): The media file to remux
+
+        Raises:
+            Exception: Generic exception if the remux command failure
+
+        Returns:
+            Path: The new remuxed file
+        """
         new_file = Path(file.parent.absolute() / file.with_suffix(".remux.mkv"))
         logger.info(f"Remuxing file {file.name} to {new_file.name} to extract metadata")
         remux_command = [
@@ -111,6 +130,17 @@ class FFmpeg:
     
     @classmethod
     def _extract_ffmpeg_json(cls, file:Path) -> dict:
+        """Extract the ffmpeg json from a media file
+
+        Args:
+            file (Path): The media file to extract metadata from
+
+        Raises:
+            Exception: Command failure
+
+        Returns:
+            dict: The ffmpeg json output of the provided file
+        """
         command_base = [
             "ffprobe",
             "-v", "quiet",
@@ -140,6 +170,17 @@ class FFmpeg:
 
     @classmethod
     def _validate_ffmpeg_json(cls, ffmpeg_json:dict) -> bool:
+        """Validates the ffmpeg json output to ensure it contains the necessary keys
+
+        Args:
+            ffmpeg_json (dict): The ffmpeg json output to validate
+
+        Raises:
+            KeyError: The ffmpeg JSON is missing necessary keys
+
+        Returns:
+            bool: The file passed validation
+        """
         try:
             ffmpeg_json["format"]["duration"]
             ffmpeg_json["streams"]
@@ -151,6 +192,14 @@ class FFmpeg:
     
     @staticmethod
     def _remove_existing_audio_tags(post:resources.InternalPost) -> resources.InternalPost:
+        """Cleanup existing audio tags from a post resource
+
+        Args:
+            post (resources.InternalPost): The post resource to cleanup audio tags from
+
+        Returns:
+            resources.InternalPost: The cleaned up post resource
+        """
         ffmpeg_tags = [
             "sound", 
             "no_sound"
@@ -166,6 +215,15 @@ class FFmpeg:
 
     @classmethod
     def _generate_audio_tags(cls, ffmpeg_json:dict, file:Path) -> list[resources.InternalTag]:
+        """Generate audio tags for a media file
+
+        Args:
+            ffmpeg_json (dict): The ffmpeg json output of the media file
+            file (Path): The media file to use for volume detection
+
+        Returns:
+            list[resources.InternalTag]: The list of audio tags based on the provided args
+        """
         logger.debug(f"Generating audio tags for {ffmpeg_json['format']['filename']}")
         audio_tags = []
         
@@ -190,6 +248,17 @@ class FFmpeg:
 
     @staticmethod
     def _check_for_audible_sound(file:Path) -> bool:
+        """Check for audible sound in a media file
+
+        Args:
+            file (Path): The media file to check for audible sound
+
+        Raises:
+            Exception: The command had an error
+
+        Returns:
+            bool: Whether the sound is audible in the media file
+        """
         logger.debug(f"Checking for audible sound in {file.name}")
         command = [
             "ffmpeg", "-i", str(file.absolute()), "-af", "volumedetect", "-hide_banner", "-vn", "-sn", "-dn", "-f", "null", "/dev/null"
@@ -228,6 +297,14 @@ class FFmpeg:
 
     @classmethod
     def _generate_video_duration_tags(cls, ffmpeg_json:dict) -> list[resources.InternalTag]:
+        """Generate duration tags for a video file
+
+        Args:
+            ffmpeg_json (dict): The ffmpeg json output of the video file
+
+        Returns:
+            list[resources.InternalTag]: The list of duration tags based on the media file
+        """
         logger.debug(f"Generating duration tags for {ffmpeg_json['format']['filename']}")
 
         duration = int(
@@ -272,6 +349,14 @@ class FFmpeg:
     
     @classmethod
     def _generate_video_framerate_tags(cls, ffmpeg_json:dict) -> list[resources.InternalTag]:
+        """Generate the framerate tags for a video file
+
+        Args:
+            ffmpeg_json (dict): The ffmpeg json output of the video file
+
+        Returns:
+            list[resources.InternalTag]: The list of framerate tags based on the media file
+        """
         video_stream = cls._get_primary_video_stream(ffmpeg_json)
         avg_frame_rate = video_stream.get("avg_frame_rate", "30/1")
         framerate = int(avg_frame_rate.split("/")[0])
@@ -284,6 +369,14 @@ class FFmpeg:
 
     @classmethod
     def _generate_video_resolution_tags(cls, ffmpeg_json:dict) -> list[resources.InternalTag]:
+        """Generate the resolution tags for a video file
+
+        Args:
+            ffmpeg_json (dict): The ffmpeg json output of the video file
+
+        Returns:
+            list[resources.InternalTag]: The list of resolution tags based on the media file
+        """
         tags = []
         video_stream = cls._get_primary_video_stream(ffmpeg_json)
         height = video_stream.get("height", 0)
@@ -300,6 +393,14 @@ class FFmpeg:
 
     @staticmethod
     def _get_primary_video_stream(ffmpeg_json:dict[str, list[dict]]) -> dict:
+        """Get the primary video stream from the ffmpeg json
+
+        Args:
+            ffmpeg_json (dict[str, list[dict]]): The ffmpeg json output of the video file
+
+        Returns:
+            dict: The primary video stream data from the provided ffmpeg json
+        """
         video_streams = [
             stream 
             for stream in ffmpeg_json["streams"] 
@@ -310,11 +411,24 @@ class FFmpeg:
 
     @classmethod
     def _check_file_supported(cls, file:Path) -> bool:
+        """Check if a file is supported for ffmpeg tagging
+
+        Args:
+            file (Path): The file to confirm support for
+
+        Returns:
+            bool: Whether the file is supported for ffmpeg tagging
+        """
         is_file_supported = file.suffix in cls._SUPPORTED_FILE_EXTENSIONS
         return is_file_supported
     
     @classmethod
     def _check_ffmpeg_installed(cls) -> bool:
+        """Check if ffmpeg is installed on the system
+
+        Returns:
+            bool: Whether ffmpeg is installed on the system
+        """
         ffprobe_command = ["ffprobe", "-version"]
         try:
             ffprobe_command_output = subprocess.run(

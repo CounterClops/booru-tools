@@ -39,7 +39,15 @@ class ConfigGroup(dict):
             super().__setitem__(key, ConfigGroup(value))
         super().__setitem__(key, value)
 
-    def merge_data(self, data:dict|_default_configs.DefaultConfigBaseGroup) -> dict:
+    def merge_data(self, data:dict|_default_configs.DefaultConfigBaseGroup) -> "ConfigGroup":
+        """Merge the provided data into the config group.
+
+        Args:
+            data (dict | _default_configs.DefaultConfigBaseGroup): The data to merge into the config group.
+
+        Returns:
+            ConfigGroup: The updated config group with the merged data
+        """
         if isinstance(data, _default_configs.DefaultConfigBaseGroup):
             raw_data:dict[str, Any] = asdict(data)
             data = {}
@@ -78,11 +86,20 @@ class ConfigManager(ConfigGroup):
 
         self._validate_config(data=self, default_dataclass=self.default_dataclass)
 
-    def _load_config_file(self, config_file:Path):
+    def _load_config_file(self, config_file:Path) -> None:
+        """Load the provided config file into the config manager.
+
+        Args:
+            config_file (Path): The path of the config file to load.
+        """
         if config_file.suffix == ".yaml":
             self._load_yaml(config_file)
     
-    def _load_envars(self):
+    def _load_envars(self) -> None:
+        """Load environment variables into the config manager.
+        Environment variables should be in the format of:
+            <config_key>__<nested_key>__<nested_key>__... = value
+        """
         config = {}
 
         envar_map = self._get_envar_keys(dataclass=self.default_dataclass)
@@ -103,7 +120,7 @@ class ConfigManager(ConfigGroup):
                     nested_config = nested_config[envar_key]
 
             if envar_type == list:
-                envar_value = envar_value.split(",")
+                envar_value = [envar_item.strip() for envar_item in envar_value.split(",")]
             elif envar_type == bool:
                 envar_value = envar_value.lower() in ["true", "1", "yes"]
             
@@ -111,7 +128,13 @@ class ConfigManager(ConfigGroup):
         
         self.merge_data(config)
 
-    def _find_default_config_file(self) -> Path:
+    @staticmethod
+    def _find_default_config_file() -> Path:
+        """Check for the presence of a default config file in the default lookup directories.
+
+        Returns:
+            Path: The found config file path.
+        """
         config_file = Path("config.yaml")
         if config_file.exists():
             logger.debug(f"found config file: {config_file}")
@@ -128,6 +151,14 @@ class ConfigManager(ConfigGroup):
     
     @classmethod
     def _get_envar_keys(cls, dataclass:_default_configs.DefaultConfigBaseGroup) -> dict[str, type]:
+        """Create a mapping of environment variable keys to their respective types, based on the provided default config dataclass.
+
+        Args:
+            dataclass (_default_configs.DefaultConfigBaseGroup): The dataclass to use as the template for default values and their types.
+
+        Returns:
+            dict[str, type]: The mapping of environment variable keys to their respective types.
+        """
         envar_map = {}
         for field in fields(dataclass):
             field_name = field.name.upper()
@@ -141,7 +172,13 @@ class ConfigManager(ConfigGroup):
         return envar_map
 
     @classmethod
-    def _validate_config(cls, data:dict, default_dataclass:_default_configs.DefaultConfigBaseGroup):
+    def _validate_config(cls, data:dict, default_dataclass:_default_configs.DefaultConfigBaseGroup) -> None:
+        """Validates the provided config data against the provided default dataclass, to ensure that all values are of the correct type.
+
+        Args:
+            data (dict): The config data to validate.
+            default_dataclass (_default_configs.DefaultConfigBaseGroup): The default dataclass to use as the template for default values and their types.
+        """
         data_keys = data.keys()
         for field in fields(default_dataclass):
             try:

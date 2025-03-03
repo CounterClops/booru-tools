@@ -135,6 +135,19 @@ class PluginLoader:
     
     @functools.cache
     def load_matching_plugin(self, name:str="", domain:str="", category:str="") -> _base.PluginBase:
+        """Find plugins that match the desired service, it will return a plugin if any single condition matches
+
+        Args:
+            name (str, optional): The plugin name to search for. Defaults to "".
+            domain (str, optional): The plugin domains to search for. Defaults to "".
+            category (str, optional): The plugin category. Defaults to "".
+
+        Raises:
+            errors.NoPluginFound: No plugin was found that matched the provided criteria
+
+        Returns:
+            _base.PluginBase: The loaded and initialised plugin that matched the desired conditions
+        """
         logger.debug(f"Starting search for {self.plugin_class.__qualname__} plugin with domain={domain}, category={category}")
 
         try:
@@ -154,11 +167,24 @@ class PluginLoader:
 
     @functools.cache
     def load_all_plugins(self) -> list[_base.PluginBase]:
+        """Load all plugins that have been found in the plugin directory
+
+        Returns:
+            list[_base.PluginBase]: The list of loaded plugins
+        """
         all_plugins:list[_base.PluginBase] = [self.initialise_plugin(plugin=plugin) for plugin in self.plugins]
         return all_plugins
         
     @functools.cache
     def initialise_plugin(self, plugin:InternalPlugin) -> InternalPlugin:
+        """Initialise the plugin with the config and session
+
+        Args:
+            plugin (InternalPlugin): The plugin to initialise
+
+        Returns:
+            InternalPlugin: The initialised plugin
+        """
         initialised_plugin:_base.PluginBase = plugin()
 
         config:dict = self.get_plugin_config(

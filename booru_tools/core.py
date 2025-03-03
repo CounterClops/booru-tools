@@ -47,6 +47,11 @@ class SessionManager:
         await self.session.close()
 
     def load_cookies(self, cookies:dict) -> None:
+        """Update the session cookies with the provided cookies dictionary
+
+        Args:
+            cookies (dict): The cookies to update the HTTP session with
+        """
         self.cookies = cookies
 
         if not self.session.closed:
@@ -54,6 +59,18 @@ class SessionManager:
             self.session.cookie_jar.update_cookies(cookies)
     
     def load_cookie_file(self, cookie_file:Path) -> dict:
+        """The HTTP cookies to load from the provided file
+
+        Args:
+            cookie_file (Path): The HTTP cookies file to load
+
+        Raises:
+            FileNotFoundError: The provided cookie file does not exist
+            ValueError: The provided cookie file was in an unsupported format
+
+        Returns:
+            dict: The cookies loaded from the file as a dictionary
+        """
         cookies = {}
 
         if not cookie_file.exists():
@@ -110,6 +127,11 @@ class BooruTools:
         self.load_plugins()
 
     def raise_graceful_exit(self, *args):
+        """Raises a graceful exit exception to shutdown the program
+
+        Raises:
+            GracefulExit: The exception to raise to shutdown the program
+        """
         try:
             loop = asyncio.get_event_loop()
             logger.debug("Cancelling all async tasks")
@@ -151,6 +173,14 @@ class BooruTools:
             self.destination_plugin:_plugin_template.ApiPlugin = self.api_loader.load_matching_plugin(domain=destination, category=destination)
     
     async def find_exact_post(self, post:resources.InternalPost) -> resources.InternalPost | None:
+        """Finds the exact post from the destination site if present
+
+        Args:
+            post (resources.InternalPost): The post resource to use when searching
+
+        Returns:
+            resources.InternalPost | None: The exact post if found, otherwise None
+        """
         logger.info(f"Getting exact post for '{post.id}'")
 
         if post.post_url not in post.sources:
@@ -160,7 +190,12 @@ class BooruTools:
         exact_post = await self.destination_plugin.find_exact_post(post=post)
         return exact_post
 
-    async def update_posts(self, posts:list[resources.InternalPost]):
+    async def update_posts(self, posts:list[resources.InternalPost]) -> None:
+        """Updates or creates the posts on the destination site
+
+        Args:
+            posts (list[resources.InternalPost]): The list of posts to update/create
+        """
         logger.info(f"Updating {len(posts)} posts")
         found_tags = []
         for posts_chunk in self.divide_chunks(posts, max_size=20):
@@ -209,12 +244,21 @@ class BooruTools:
         
         if not self.config["core"]["update_tag_categories"]:
             logger.info("Tag category updates disabled, skipping")
-            return
+            return None
         
         logger.info(f"Updating tags for {len(filtered_tags)} tags")
         await self.update_tags(tags=filtered_tags)
+        return None
 
-    def check_post_allowed(self, post:resources.InternalPost):
+    def check_post_allowed(self, post:resources.InternalPost) -> bool:
+        """Check if the provided post resource meets the requirements to be uploaded
+
+        Args:
+            post (resources.InternalPost): The post resource to check if allowed
+
+        Returns:
+            bool: Whether the post is allowed to be uploaded
+        """
         blacklisted_tags = self.config["core"]["blacklisted_tags"]
         if post.contains_any_tags(tags=blacklisted_tags):
             logger.debug(f"Post '{post.id}' contains blacklisted tags from {blacklisted_tags}")
@@ -238,6 +282,11 @@ class BooruTools:
         return True
 
     async def update_tags(self, tags:list[resources.InternalTag]):
+        """The tags to push to the destination site
+
+        Args:
+            tags (list[resources.InternalTag]): The list of tags to push to the destination site
+        """
         logger.info(f"Updating {len(tags)} tags")
         for tags_chunk in self.divide_chunks(tags, max_size=500):
             tasks:list[asyncio.Task] = []
@@ -275,6 +324,14 @@ class BooruTools:
         shutil.rmtree(directory)
     
     def add_missing_post_hashes(self, post:resources.InternalPost) -> resources.InternalPost:
+        """Add missing or mismatched hashes to post resource
+
+        Args:
+            post (resources.InternalPost): The post resource to update file hashes for
+
+        Returns:
+            resources.InternalPost: The post resource with update hashes
+        """
         file_md5 = self.get_md5_hash(file_path=post.local_file)
         file_sha1 = self.get_sha1_hash(file_path=post.local_file)
 
@@ -293,6 +350,14 @@ class BooruTools:
 
     @staticmethod
     def get_md5_hash(file_path:Path) -> str:
+        """Get the MD5 hash for the provided file
+
+        Args:
+            file_path (Path): The file to generate a MD5 hash for
+
+        Returns:
+            str: The MD5 hash for the file
+        """
         if not file_path.exists():
             return ""
         
@@ -308,6 +373,14 @@ class BooruTools:
 
     @staticmethod
     def get_sha1_hash(file_path:Path) -> str:
+        """Get the SHA1 hash for the provided file
+
+        Args:
+            file_path (Path): The file to generate a SHA1 hash for
+
+        Returns:
+            str: The SHA1 hash for the file
+        """
         if not file_path.exists():
             return ""
         
@@ -322,7 +395,17 @@ class BooruTools:
         return sha1_hash
 
     @staticmethod
-    def split_tag_list(tag_string:str, and_seperator:str="|", or_seperator:str=","):
+    def split_tag_list(tag_string:str, and_seperator:str="|", or_seperator:str=",") -> list[str|list[str]]:
+        """Split a tag string into a list of tags for more complex tag matching`
+
+        Args:
+            tag_string (str): The tag string to split into a list
+            and_seperator (str, optional): The and seperator for any split strings, creating a sublist. Defaults to "|".
+            or_seperator (str, optional): The or seperate to seperate the string with. Defaults to ",".
+
+        Returns:
+            list[str|list[str]]: The list of tag strings for more complex tag matching
+        """
         tags = []
         comma_split_tags = [tag for tag in tag_string.split(or_seperator) if tag != ""]
         for tag in comma_split_tags:
@@ -334,7 +417,16 @@ class BooruTools:
         return tags
     
     @staticmethod
-    def divide_chunks(array:list, max_size:int=50):
+    def divide_chunks(array:list, max_size:int=50) -> list:
+        """Divide the provided array into chunks of the provided size through a generator
+
+        Args:
+            array (list): The array to divide into chunks
+            max_size (int, optional): The max chunk size to split by. Defaults to 50.
+
+        Yields:
+            list: The divided chunks of the array
+        """
         total_size = len(array)
         for i in range(0, len(array), max_size):
             new_max = i + max_size
@@ -356,6 +448,14 @@ class BooruTools:
 
     @staticmethod
     def filter_tags(tags:list[resources.InternalTag]) -> list[resources.InternalTag]:
+        """Filter out tags that are in the default/invalid category
+
+        Args:
+            tags (list[resources.InternalTag]): The list of tags to filter
+
+        Returns:
+            list[resources.InternalTag]: The list of filtered tags
+        """
         filtered_tags = []
         for tag in tags:
             if tag in filtered_tags:

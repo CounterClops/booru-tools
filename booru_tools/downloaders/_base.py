@@ -26,10 +26,20 @@ class DownloadJob:
     _downloaded_links:list[str] = field(default_factory=list)
 
     def download_media(self) -> None:
+        """Download all pending download items in the download job
+        """
         self._download_manager.download_pending_items(job=self)
         return None
     
     def all_item_count(self, only_download_desired:bool=False) -> int:
+        """_summary_
+
+        Args:
+            only_download_desired (bool, optional): Only count the desired_download. Defaults to False.
+
+        Returns:
+            int: The number of items in the download job
+        """
         if not only_download_desired:
             return len(self.download_items)
         
