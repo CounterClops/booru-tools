@@ -1,8 +1,7 @@
 from pathlib import Path
-from urllib.parse import urlparse
 from loguru import logger
-from collections import defaultdict
 from http.cookiejar import MozillaCookieJar
+from typing import Generator
 import json
 import shutil
 import hashlib
@@ -330,7 +329,7 @@ class BooruTools:
             post (resources.InternalPost): The post resource to update file hashes for
 
         Returns:
-            resources.InternalPost: The post resource with update hashes
+            resources.InternalPost: The post resource with updated hashes
         """
         file_md5 = self.get_md5_hash(file_path=post.local_file)
         file_sha1 = self.get_sha1_hash(file_path=post.local_file)
@@ -417,7 +416,7 @@ class BooruTools:
         return tags
     
     @staticmethod
-    def divide_chunks(array:list, max_size:int=50) -> list:
+    def divide_chunks(array:list, max_size:int=50) -> Generator[list, None, None]:
         """Divide the provided array into chunks of the provided size through a generator
 
         Args:
