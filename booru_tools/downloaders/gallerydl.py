@@ -198,13 +198,15 @@ class GalleryDlManager(_base.DownloadManager):
         continue_download = True
 
         while continue_download:
-            range = f"{min_range}-{max_range}"
-            logger.debug(f"Downloading range {range} from {url}")
-
-            params = [
-                f"--range={range}",
-                self.add_extractor_to_url(url)
-            ]
+            params = []
+            
+            if self.page_size != 0:
+                range = f"{min_range}-{max_range}"
+                logger.debug(f"Downloading range {range} from {url}")
+                params.append(f"--range={range}")
+            else:
+                logger.debug(f"Downloading all posts from {url}")
+            params.append(self.add_extractor_to_url(url))
 
             job = self.create_download_job(params)
 
@@ -233,6 +235,10 @@ class GalleryDlManager(_base.DownloadManager):
             item for item in job.download_items
             if item.download_url not in self._downloaded_links
         ]
+
+        if self.page_size == 0:
+            logger.debug(f"Page size is 0, download should stop now")
+            return False
 
         new_items_found = bool(new_items)
         if self.allowed_blank_pages == 0 or self.no_download:
