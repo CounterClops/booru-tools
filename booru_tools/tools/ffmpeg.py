@@ -205,10 +205,16 @@ class FFmpeg:
             "no_sound"
         ]
 
+        tags_to_remove:list[resources.InternalTag] = []
+        
         for tag in post.tags:
             for tag_name in tag.names:
                 if tag_name in ffmpeg_tags:
-                    post.tags.remove(tag)
+                    tags_to_remove.append(tag)
+                    break
+        
+        for tag in tags_to_remove:
+            post.tags.remove(tag)
         
         return post
         

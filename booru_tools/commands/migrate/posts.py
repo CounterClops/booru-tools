@@ -19,14 +19,14 @@ class MigratePostsCommand():
                 import_site:str="",
                 urls_file:Path=None,
                 cookies:Path=None,
-                blacklisted_tags:str="",
-                required_tags:str="",
+                blacklisted_tags:str=None,
+                required_tags:str=None,
                 allowed_blank_pages:int=1,
                 match_source:bool=True,
                 plugin_override:str="",
                 download_page_size:int=100,
-                allowed_safety:str="",
-                minimum_score:int=0
+                allowed_safety:str=None,
+                minimum_score:int=None
             ):
         
         self.booru_tools = core.BooruTools()
@@ -49,6 +49,13 @@ class MigratePostsCommand():
             url_base:str = click.prompt("The provided plugin has no 'url_base', please provide the url start like 'https://danbooru.donmai.us'", type=str)
             url_base = url_base.rstrip("/")
             self.booru_tools.destination_plugin.URL_BASE = url_base
+        
+        self.booru_tools.set_options(
+            blacklisted_tags=blacklisted_tags,
+            required_tags=required_tags,
+            allowed_safety=allowed_safety,
+            minimum_score=minimum_score,
+        )
 
     async def run(self, *args, **kwargs):
         await self.post_init(*args, **kwargs)

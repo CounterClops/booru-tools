@@ -237,7 +237,7 @@ class GalleryDlManager(_base.DownloadManager):
         ]
 
         if self.page_size == 0:
-            logger.debug(f"Page size is 0, download should stop now")
+            logger.debug(f"Page size is set 0, so all posts should have been downloaded in prior request")
             return False
 
         new_items_found = bool(new_items)

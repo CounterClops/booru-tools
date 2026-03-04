@@ -71,6 +71,8 @@ class DefaultToolsFfmpegConfig(DefaultConfigBaseGroup):
     create_duration_tags:bool = field(default=True)
     create_basic_video_tags:bool = field(default=True)
     create_ffmpeg_processed_tag:bool = field(default=True)
+    no_sound_threshold:int = field(default=-30)
+    loud_sound_threshold:int = field(default=-10)
 
 @dataclass(kw_only=True)
 class DefaultToolsConfig(DefaultConfigBaseGroup):

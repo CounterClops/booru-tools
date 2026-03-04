@@ -125,6 +125,30 @@ class BooruTools:
             logger.debug(f"Error starting session due to {e}")
         self.load_plugins()
 
+    def set_options(self,
+            blacklisted_tags:str=None,
+            required_tags:str=None,
+            allowed_safety:str=None,
+            minimum_score:str=None,
+            add_video_metatags:str=None,
+            cleanup_temp_directories:str=None,
+            update_tag_categories:str=None,
+            skip_every_second_page:str=None
+        ) -> None:
+
+        if blacklisted_tags:
+            self.config["core"]["blacklisted_tags"] = self.split_tag_list(tag_string=blacklisted_tags)
+        
+        if required_tags:
+            self.config["core"]["required_tags"] = self.split_tag_list(tag_string=required_tags)
+
+        if allowed_safety:
+            self.config["core"]["allowed_safety"] = allowed_safety.split(",")
+
+        if minimum_score:
+            self.config["core"]["minimum_score"] = int(minimum_score)
+        
+
     def raise_graceful_exit(self, *args):
         """Raises a graceful exit exception to shutdown the program
 

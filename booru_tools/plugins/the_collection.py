@@ -1,1 +1,33 @@
-# https://the-collection.booru.org/
+import re
+
+from booru_tools.plugins import _plugin_template, gelbooru
+from booru_tools.shared import constants
+
+class SharedAttributes:
+    _DOMAINS = [
+        "the-collection.booru.org"
+    ]
+    _CATEGORY = []
+    _NAME = "the-collection"
+
+    URL_BASE = "https://the-collection.booru.org"
+
+    @property
+    def DEFAULT_POST_SEARCH_URL(self):
+        return f"{self.URL_BASE}/index.php?page=dapi&s=post&q=index"
+    
+    POST_CATEGORY_MAP = {}
+
+class TheCollectionMeta(SharedAttributes, gelbooru.GelbooruMeta):
+    pass
+
+class TheCollectionValidator(SharedAttributes, _plugin_template.ValidationPlugin):
+    POST_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z0-9.-]+\/index.php.+post.+)|(https:\/\/[a-zA-Z0-9.-]+\/+the-collection\/+images\/.+)")
+    GLOBAL_URL_PATTERN = re.compile(r"(https:\/\/[a-zA-Z0-9.-]+\/?$)")
+    
+    def get_source_type(self, url:str):
+        if self.POST_URL_PATTERN.match(url):
+            return constants.SourceTypes.POST
+        if self.GLOBAL_URL_PATTERN.match(url):
+            return constants.SourceTypes.GLOBAL
+        return constants.SourceTypes._DEFAULT

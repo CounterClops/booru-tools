@@ -1,7 +1,7 @@
 from pathlib import Path
 from loguru import logger
-from typing import Any
-from dataclasses import asdict, fields, is_dataclass
+from typing import Any, Type
+from dataclasses import dataclass, asdict, fields, is_dataclass
 
 import yaml
 import os
@@ -39,16 +39,16 @@ class ConfigGroup(dict):
             super().__setitem__(key, ConfigGroup(value))
         super().__setitem__(key, value)
 
-    def merge_data(self, data:dict|_default_configs.DefaultConfigBaseGroup) -> "ConfigGroup":
+    def merge_data(self, data:dict|Type[dataclass]) -> "ConfigGroup":
         """Merge the provided data into the config group.
 
         Args:
-            data (dict | _default_configs.DefaultConfigBaseGroup): The data to merge into the config group.
+            data (dict | Type[dataclass]): The data to merge into the config group.
 
         Returns:
             ConfigGroup: The updated config group with the merged data
         """
-        if isinstance(data, _default_configs.DefaultConfigBaseGroup):
+        if is_dataclass(data):
             raw_data:dict[str, Any] = asdict(data)
             data = {}
             for key, value in raw_data.items():
@@ -72,7 +72,7 @@ class ConfigGroup(dict):
         return self
 
 class ConfigManager(ConfigGroup):
-    def __init__(self, default_dataclass, load_envars=False):
+    def __init__(self, default_dataclass:Type[dataclass], load_envars=False):
         logger.debug(f"loading default values into config manager")
         self.default_dataclass = default_dataclass
         self.merge_data(asdict(default_dataclass))
@@ -150,11 +150,11 @@ class ConfigManager(ConfigGroup):
         self.merge_data(data)
     
     @classmethod
-    def _get_envar_keys(cls, dataclass:_default_configs.DefaultConfigBaseGroup) -> dict[str, type]:
+    def _get_envar_keys(cls, dataclass:Type[dataclass]) -> dict[str, type]:
         """Create a mapping of environment variable keys to their respective types, based on the provided default config dataclass.
 
         Args:
-            dataclass (_default_configs.DefaultConfigBaseGroup): The dataclass to use as the template for default values and their types.
+            dataclass (Type[dataclass]): The dataclass to use as the template for default values and their types.
 
         Returns:
             dict[str, type]: The mapping of environment variable keys to their respective types.
@@ -172,12 +172,12 @@ class ConfigManager(ConfigGroup):
         return envar_map
 
     @classmethod
-    def _validate_config(cls, data:dict, default_dataclass:_default_configs.DefaultConfigBaseGroup) -> None:
+    def _validate_config(cls, data:dict, default_dataclass:Type[dataclass]) -> None:
         """Validates the provided config data against the provided default dataclass, to ensure that all values are of the correct type.
 
         Args:
             data (dict): The config data to validate.
-            default_dataclass (_default_configs.DefaultConfigBaseGroup): The default dataclass to use as the template for default values and their types.
+            default_dataclass (Type[dataclass]): The default dataclass to use as the template for default values and their types.
         """
         data_keys = data.keys()
         for field in fields(default_dataclass):
