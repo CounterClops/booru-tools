@@ -26,7 +26,11 @@ class MigratePostsCommand():
                 plugin_override:str="",
                 download_page_size:int=100,
                 allowed_safety:str=None,
-                minimum_score:int=None
+                minimum_score:int=None,
+                post_concurrency:int=None,
+                large_file_size_mb:int=None,
+                large_file_concurrency:int=None,
+                transient_backoff_recovery_successes:int=None
             ):
         
         self.booru_tools = core.BooruTools()
@@ -55,6 +59,10 @@ class MigratePostsCommand():
             required_tags=required_tags,
             allowed_safety=allowed_safety,
             minimum_score=minimum_score,
+            post_update_concurrency=post_concurrency,
+            large_file_size_mb=large_file_size_mb,
+            large_file_concurrency=large_file_concurrency,
+            transient_backoff_recovery_successes=transient_backoff_recovery_successes,
         )
 
     async def run(self, *args, **kwargs):
@@ -163,6 +171,10 @@ class MigratePostsCommand():
 @click.option('--allowed-blank-pages', type=int, default=1, help="Number of pages to download post pages before stopping")
 @click.option('--plugin-override', type=str, help="Provide plugin override values")
 @click.option('--download-page-size', type=int, default=100, help="The number of posts to download per page")
+@click.option('--post-concurrency', type=int, default=None, help="Max concurrent post pushes for normal-sized files")
+@click.option('--large-file-size-mb', type=int, default=None, help="Size threshold in MB where post pushes switch to large-file mode")
+@click.option('--large-file-concurrency', type=int, default=None, help="Max concurrent post pushes while handling large files")
+@click.option('--transient-backoff-recovery-successes', type=int, default=None, help="Successful pushes required before restoring normal concurrency after transient failures")
 @click.option('--allowed-safety', type=str, default="", help=f"The comma seperated list of allowed safety ratings from [{constants.Safety.SAFE},{constants.Safety.SKETCHY},{constants.Safety.UNSAFE}]")
 # Need to add something to require specific ratings as these aren't generally
 def cli(*args, **kwargs):

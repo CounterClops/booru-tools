@@ -1,7 +1,7 @@
 from pathlib import Path
 from loguru import logger
 from http.cookiejar import MozillaCookieJar
-from typing import Generator
+from typing import Generator, Any
 import json
 import shutil
 import hashlib
@@ -133,7 +133,11 @@ class BooruTools:
             add_video_metatags:str=None,
             cleanup_temp_directories:str=None,
             update_tag_categories:str=None,
-            skip_every_second_page:str=None
+            skip_every_second_page:str=None,
+            post_update_concurrency:int=None,
+            large_file_size_mb:int=None,
+            large_file_concurrency:int=None,
+            transient_backoff_recovery_successes:int=None
         ) -> None:
 
         if blacklisted_tags:
@@ -147,6 +151,18 @@ class BooruTools:
 
         if minimum_score:
             self.config["core"]["minimum_score"] = int(minimum_score)
+
+        if post_update_concurrency is not None:
+            self.config["core"]["post_update_concurrency"] = max(1, int(post_update_concurrency))
+
+        if large_file_size_mb is not None:
+            self.config["core"]["large_file_size_mb"] = max(1, int(large_file_size_mb))
+
+        if large_file_concurrency is not None:
+            self.config["core"]["large_file_concurrency"] = max(1, int(large_file_concurrency))
+
+        if transient_backoff_recovery_successes is not None:
+            self.config["core"]["transient_backoff_recovery_successes"] = max(1, int(transient_backoff_recovery_successes))
         
 
     def raise_graceful_exit(self, *args):
@@ -221,43 +237,102 @@ class BooruTools:
         """
         logger.info(f"Updating {len(posts)} posts")
         found_tags = []
-        for posts_chunk in self.divide_chunks(posts, max_size=20):
-            tasks:list[asyncio.Task] = []
-            posts_chunk:list[resources.InternalPost]
-            async with asyncio.TaskGroup() as task_group:
-                for post in posts_chunk:
-                    if not post.local_file:
-                        logger.debug(f"No file to upload for '{post.id}'")
+        post_update_concurrency = max(1, int(self.config["core"].get("post_update_concurrency", 2)))
+        large_file_size_mb = max(1, int(self.config["core"].get("large_file_size_mb", 20)))
+        large_file_size_bytes = large_file_size_mb * 1024 * 1024
+        large_file_concurrency = max(1, int(self.config["core"].get("large_file_concurrency", 1)))
+        recovery_successes = max(1, int(self.config["core"].get("transient_backoff_recovery_successes", 8)))
+
+        logger.info(
+            f"Using adaptive post update concurrency normal={post_update_concurrency}, "
+            f"large={large_file_concurrency}, large_threshold={large_file_size_mb}MB"
+        )
+
+        prepared_posts:list[resources.InternalPost] = []
+        for post in posts:
+            post = self._prepare_post_for_push(post=post)
+            if post.tags:
+                found_tags.extend(post.tags)
+            prepared_posts.append(post)
+
+        state_lock = asyncio.Lock()
+        state_updated = asyncio.Condition(lock=state_lock)
+        active_jobs = 0
+        active_large_jobs = 0
+        current_limit = post_update_concurrency
+        successes_since_backoff = 0
+
+        async def _acquire_slot(is_large:bool) -> None:
+            nonlocal active_jobs, active_large_jobs
+            async with state_updated:
+                while True:
+                    no_large_jobs = active_large_jobs == 0
+                    if is_large:
+                        if no_large_jobs and active_jobs < large_file_concurrency:
+                            active_jobs += 1
+                            active_large_jobs += 1
+                            return
                     else:
-                        logger.debug(f"File '{post.local_file.name}' found for '{post.id}'")
-                        post = self.add_missing_post_hashes(post=post)
-                    
-                    if self.config["core"]["add_video_metatags"]:
-                        try:
-                            post = FFmpeg.add_video_tags(post=post)
-                        except Exception as e:
-                            logger.error(f"Error adding video tags to '{post.id}' with {e}")
-                            logger.trace(traceback.format_exc())
+                        if no_large_jobs and active_jobs < current_limit:
+                            active_jobs += 1
+                            return
+                    await state_updated.wait()
 
-                    if post.post_url:
-                        if post.post_url not in post.sources:
-                            logger.debug(f"Updating post ({post.id}) sources with '{post.post_url}'")
-                            post.sources.append(post.post_url)
-                    
-                    for source in post.sources:
-                        if self.destination_plugin.URL_BASE in source:
-                            logger.debug(f"Removing source '{source}' as its for the destination site '{self.destination_plugin.URL_BASE}'")
-                            post.sources.pop(post.sources.index(source))
+        async def _release_slot(is_large:bool) -> None:
+            nonlocal active_jobs, active_large_jobs
+            async with state_updated:
+                active_jobs -= 1
+                if is_large:
+                    active_large_jobs -= 1
+                state_updated.notify_all()
 
-                    if post.tags:
-                        found_tags.extend(post.tags)
-
-                    logger.debug(f"Updating post '{post.id}'")
-                    task = task_group.create_task(
-                        self.destination_plugin.push_post(post=post)
+        async def _on_transient_failure(post:resources.InternalPost, reason:Any) -> None:
+            nonlocal current_limit, successes_since_backoff
+            async with state_updated:
+                successes_since_backoff = 0
+                if current_limit != large_file_concurrency:
+                    logger.warning(
+                        f"Detected transient upload failure while pushing '{post.id}' ({reason}), "
+                        f"temporarily reducing post concurrency to {large_file_concurrency}"
                     )
-                    tasks.append(task)
-            results = [task.result() for task in tasks]
+                current_limit = large_file_concurrency
+                state_updated.notify_all()
+
+        async def _on_success() -> None:
+            nonlocal current_limit, successes_since_backoff
+            async with state_updated:
+                if current_limit != large_file_concurrency:
+                    return
+                successes_since_backoff += 1
+                if successes_since_backoff >= recovery_successes:
+                    current_limit = post_update_concurrency
+                    successes_since_backoff = 0
+                    logger.info(
+                        f"Recovered adaptive concurrency back to {post_update_concurrency} "
+                        f"after {recovery_successes} successful pushes"
+                    )
+                    state_updated.notify_all()
+
+        async def _push_single_post(post:resources.InternalPost) -> None:
+            file_size = self._get_post_file_size(post=post)
+            is_large = bool(file_size and file_size >= large_file_size_bytes)
+            await _acquire_slot(is_large=is_large)
+            try:
+                logger.debug(f"Updating post '{post.id}'")
+                result = await self.destination_plugin.push_post(post=post)
+                if post.local_file and result is None:
+                    await _on_transient_failure(post=post, reason="empty-result")
+                else:
+                    await _on_success()
+            except (errors.GatewayTimeout, errors.ServiceUnavailable, errors.TooManyRequestsError, aiohttp.ClientError) as e:
+                await _on_transient_failure(post=post, reason=type(e).__name__)
+                raise
+            finally:
+                await _release_slot(is_large=is_large)
+
+        async with asyncio.TaskGroup() as task_group:
+            for post in prepared_posts:
+                task_group.create_task(_push_single_post(post=post))
         
         filtered_tags = self.filter_tags(tags=found_tags)
         
@@ -272,6 +347,47 @@ class BooruTools:
         logger.info(f"Updating tags for {len(filtered_tags)} tags")
         await self.update_tags(tags=filtered_tags)
         return None
+
+    def _prepare_post_for_push(self, post:resources.InternalPost) -> resources.InternalPost:
+        if not post.local_file:
+            logger.debug(f"No file to upload for '{post.id}'")
+        else:
+            logger.debug(f"File '{post.local_file.name}' found for '{post.id}'")
+            post = self.add_missing_post_hashes(post=post)
+
+        if self.config["core"]["add_video_metatags"]:
+            try:
+                post = FFmpeg.add_video_tags(post=post)
+            except Exception as e:
+                logger.error(f"Error adding video tags to '{post.id}' with {e}")
+                logger.trace(traceback.format_exc())
+
+        if post.post_url and post.post_url not in post.sources:
+            logger.debug(f"Updating post ({post.id}) sources with '{post.post_url}'")
+            post.sources.append(post.post_url)
+
+        destination_sources = [
+            source for source in post.sources
+            if self.destination_plugin.URL_BASE and self.destination_plugin.URL_BASE in source
+        ]
+        for source in destination_sources:
+            logger.debug(
+                f"Removing source '{source}' as its for the destination site '{self.destination_plugin.URL_BASE}'"
+            )
+            post.sources.pop(post.sources.index(source))
+
+        return post
+
+    @staticmethod
+    def _get_post_file_size(post:resources.InternalPost) -> int:
+        if not post.local_file:
+            return 0
+        if not post.local_file.exists():
+            return 0
+        try:
+            return post.local_file.stat().st_size
+        except OSError:
+            return 0
 
     def check_post_allowed(self, post:resources.InternalPost) -> bool:
         """Check if the provided post resource meets the requirements to be uploaded

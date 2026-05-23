@@ -255,28 +255,78 @@ class ValidateUniquePostTags:
         async def wrapper(*args: Any, **kwargs: Any) -> R:
             try:
                 return await func(*args, **kwargs)
-            except TagAlreadyExistsError as e:
+            except (TagAlreadyExistsError, IntegrityError, errors.InternalServerError) as e:
+                if isinstance(e, errors.InternalServerError):
+                    error_message = str(e).lower()
+                    likely_tag_conflict = ("duplicate" in error_message) or ("tag_name" in error_message)
+                    if not likely_tag_conflict:
+                        raise
+
                 logger.warning(f"{e} Going to check for tag conflicts and attempt a re-run")
                 func_self = args[0]
                 post:resources.InternalPost = kwargs.pop(self.post_param)
-
-                tag_names = []
-                for tag in post.tags:
-                    for name in tag.names:
-                        if name in tag_names:
-                            continue
-                        tag_names.append(name)
 
                 conflicting_tags:list[Tag] = await func_self._get_conflicting_tags(
                     names=post.str_tags
                 )
 
-                logger.debug(f"Found {len(conflicting_tags)} conflicting tags")
-                for tag in conflicting_tags:
+                if not conflicting_tags:
+                    raise
+
+                logger.debug(f"Found {len(conflicting_tags)} conflicting tags, normalizing post tags")
+
+                canonical_tag_by_name:dict[str, resources.InternalTag] = {}
+                for conflicting_tag in conflicting_tags:
+                    if not conflicting_tag.names:
+                        continue
+
+                    primary_name = conflicting_tag.names[0]
+                    canonical_tag = resources.InternalTag(
+                        names=[primary_name],
+                        category=conflicting_tag.category
+                    )
+
+                    for name in conflicting_tag.names:
+                        canonical_tag_by_name[name] = canonical_tag
+
+                normalized_tags:list[resources.InternalTag] = []
+                seen_tag_keys:set[tuple[str, str]] = set()
+                removed_tag_names:set[str] = set()
+
+                for tag in post.tags:
+                    resolved_tag = None
                     for name in tag.names:
-                        if name in tag_names:
+                        resolved_tag = canonical_tag_by_name.get(name, None)
+                        if resolved_tag:
+                            break
+
+                    if not resolved_tag:
+                        if not tag.names:
                             continue
-                        tag_names.append(name)
+                        resolved_tag = resources.InternalTag(
+                            names=[tag.names[0]],
+                            category=tag.category
+                        )
+
+                    tag_key = (resolved_tag.category, resolved_tag.names[0])
+                    if tag_key in seen_tag_keys:
+                        removed_tag_names.update(tag.names)
+                        continue
+
+                    seen_tag_keys.add(tag_key)
+                    normalized_tags.append(resolved_tag)
+
+                    for original_name in tag.names:
+                        if original_name != resolved_tag.names[0]:
+                            removed_tag_names.add(original_name)
+
+                if normalized_tags:
+                    logger.debug(f"Normalized post '{post.id}' tags from {len(post.tags)} to {len(normalized_tags)}")
+                    if removed_tag_names:
+                        logger.debug(
+                            f"Removed conflicting tag aliases for post '{post.id}': {sorted(removed_tag_names)}"
+                        )
+                    post.tags = normalized_tags
                 
                 kwargs[self.post_param] = post
                 return await func(*args, **kwargs)
@@ -1360,7 +1410,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
     @ValidateUniquePostTags(post_param="post")
     @ProcessingErrorWarnAndSkip()
     @errors.RetryOnExceptions(
-        exceptions=[errors.GatewayTimeout, errors.ServiceUnavailable],
+        exceptions=[errors.GatewayTimeout, errors.ServiceUnavailable, errors.TooManyRequestsError],
         wait_time=60,
         retry_limit=6
     )
@@ -1405,7 +1455,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
     @ValidateUniquePostTags(post_param="new_post")
     @errors.RetryOnExceptions(
-        exceptions=[errors.GatewayTimeout, errors.ServiceUnavailable],
+        exceptions=[errors.GatewayTimeout, errors.ServiceUnavailable, errors.TooManyRequestsError],
         wait_time=30,
         retry_limit=6
     )
@@ -1503,7 +1553,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         return thumbnail_content_token
 
     @errors.RetryOnExceptions(
-        exceptions=[errors.GatewayTimeout, errors.ServiceUnavailable],
+        exceptions=[errors.GatewayTimeout, errors.ServiceUnavailable, errors.TooManyRequestsError],
         wait_time=60,
         retry_limit=6
     )
