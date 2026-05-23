@@ -61,8 +61,15 @@ class DefaultPluginsSzurubooruConfig(DefaultConfigBaseGroup):
     force_source_check:bool = field(default=True)
 
 @dataclass(kw_only=True)
+class DefaultPluginsRule34Config(DefaultConfigBaseGroup):
+    api_key:str = field(default=None)
+    user_id:str = field(default=None)
+    requests_per_minute:int = field(default=None)
+
+@dataclass(kw_only=True)
 class DefaultPluginsConfig(DefaultConfigBaseGroup):
     szurubooru:DefaultPluginsSzurubooruConfig = field(default_factory=DefaultPluginsSzurubooruConfig)
+    rule34:DefaultPluginsRule34Config = field(default_factory=DefaultPluginsRule34Config)
 
 ### Tools
 @dataclass(kw_only=True)
