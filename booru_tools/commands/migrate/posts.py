@@ -30,7 +30,8 @@ class MigratePostsCommand():
                 post_concurrency:int=None,
                 large_file_size_mb:int=None,
                 large_file_concurrency:int=None,
-                transient_backoff_recovery_successes:int=None
+                transient_backoff_recovery_successes:int=None,
+                cleanup_tmp:bool=True,
             ):
         
         self.booru_tools = core.BooruTools()
@@ -59,11 +60,16 @@ class MigratePostsCommand():
             required_tags=required_tags,
             allowed_safety=allowed_safety,
             minimum_score=minimum_score,
+            cleanup_temp_directories=cleanup_tmp,
             post_update_concurrency=post_concurrency,
             large_file_size_mb=large_file_size_mb,
             large_file_concurrency=large_file_concurrency,
             transient_backoff_recovery_successes=transient_backoff_recovery_successes,
         )
+
+        # Eagerly expand the blacklist to include all aliases + recursive implications
+        # from the destination site so that check_post_allowed covers all known aliases.
+        await self.booru_tools.expand_blacklist_tags()
 
     async def run(self, *args, **kwargs):
         await self.post_init(*args, **kwargs)
@@ -79,7 +85,8 @@ class MigratePostsCommand():
                     logger.critical(f"url import failed with {e}")
                     logger.trace(traceback.format_exc())
                 finally:
-                    job.cleanup_folders()
+                    if self.booru_tools.cleanup_temp_directories:
+                        job.cleanup_folders()
         
         self.booru_tools.cleanup_process_directories()
         await self.booru_tools.session_manager.close()
@@ -99,7 +106,7 @@ class MigratePostsCommand():
         try:
             meta_plugin:_plugin_template.MetadataPlugin = self.booru_tools.metadata_loader.load_matching_plugin(domain=domain)
         except errors.NoPluginFound as e:
-            logger.error(f"Could not find a plugin for '{domain}' skipping import")
+            logger.warning(f"Could not find a plugin for '{domain}', skipping import")
             yield e
             return
         
@@ -175,6 +182,7 @@ class MigratePostsCommand():
 @click.option('--large-file-size-mb', type=int, default=None, help="Size threshold in MB where post pushes switch to large-file mode")
 @click.option('--large-file-concurrency', type=int, default=None, help="Max concurrent post pushes while handling large files")
 @click.option('--transient-backoff-recovery-successes', type=int, default=None, help="Successful pushes required before restoring normal concurrency after transient failures")
+@click.option('--cleanup-tmp/--no-cleanup-tmp', default=True, help='Whether temporary folders are deleted after the run')
 @click.option('--allowed-safety', type=str, default="", help=f"The comma seperated list of allowed safety ratings from [{constants.Safety.SAFE},{constants.Safety.SKETCHY},{constants.Safety.UNSAFE}]")
 # Need to add something to require specific ratings as these aren't generally
 def cli(*args, **kwargs):

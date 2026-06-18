@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
 from pathlib import Path
-from typing import Generator
+import shutil
+from typing import Callable, Generator
 from urllib.parse import urljoin, urlparse
-from urllib.request import Request, urlopen
 
 from loguru import logger
 
@@ -15,17 +16,24 @@ from booru_tools.shared import config
 
 
 class YtDlpManager(_base.DownloadManager):
-    POST_URL_PATTERN = re.compile(r"https?://(?:www\.)?rule34video\.com/videos?/\d+(?:/[^\s\"'#?]+)?/?", re.IGNORECASE)
-
-    def __init__(self, *, extra_params: list[str] | None = None):
+    def __init__(
+        self,
+        *,
+        extra_params: list[str] | None = None,
+        url_resolver: Callable[[str], list[str]] | None = None,
+        metadata_enricher: Callable[[dict], dict] | None = None,
+        metadata_id_resolver: Callable[[dict], str] | None = None,
+    ):
         logger.debug(f"Loading {self.__class__.__name__}")
         self.extra_params: list[str] = list(extra_params or [])
+        self.url_resolver = url_resolver
+        self.metadata_enricher = metadata_enricher
+        self.metadata_id_resolver = metadata_id_resolver
         self._downloaded_links: list[str] = []
 
         config_manager = config.shared_config_manager
         cookies_file: Path = config_manager["networking"]["cookies_file"]
         self.page_size: int = config_manager["downloaders"]["gallery_dl"]["page_size"]
-        self.allowed_blank_pages: int = config_manager["downloaders"]["gallery_dl"]["allowed_blank_pages"]
         self.ignored_file_extensions: list[str] = config_manager["downloaders"]["gallery_dl"]["ignored_file_extensions"]
         self.no_download: bool = config_manager["downloaders"]["gallery_dl"]["no_download"]
 
@@ -45,22 +53,25 @@ class YtDlpManager(_base.DownloadManager):
         logger.debug(f"Running command: {' '.join(command)}")
         return subprocess.run(command, capture_output=True, text=True, check=check)
 
-    def _normalise_video_url(self, url: str) -> str:
-        if not url:
+    @staticmethod
+    def _normalise_candidate_url(url: str, *, base_url: str) -> str:
+        if not isinstance(url, str):
             return ""
 
-        parsed = urlparse(url)
-        clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}" if parsed.scheme and parsed.netloc else url
+        stripped_url = url.strip()
+        if not stripped_url:
+            return ""
 
-        if clean_url.startswith("//"):
-            clean_url = f"https:{clean_url}"
+        if stripped_url.startswith("//"):
+            stripped_url = f"https:{stripped_url}"
+        elif not stripped_url.startswith(("http://", "https://")):
+            stripped_url = urljoin(base_url, stripped_url)
 
-        if not clean_url.startswith("http"):
-            clean_url = urljoin("https://rule34video.com", clean_url)
+        parsed = urlparse(stripped_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return ""
 
-        if self.POST_URL_PATTERN.match(clean_url):
-            return clean_url.rstrip("/") + "/"
-        return ""
+        return stripped_url
 
     def _extract_flat_playlist_video_urls(self, url: str) -> list[str]:
         params = [
@@ -92,54 +103,56 @@ class YtDlpManager(_base.DownloadManager):
             if not isinstance(entry, dict):
                 continue
 
-            candidate = (
-                entry.get("webpage_url")
-                or entry.get("original_url")
-                or entry.get("url")
-            )
-
-            candidate = self._normalise_video_url(candidate)
-            if candidate:
-                found_urls.append(candidate)
-                continue
-
-            entry_id = str(entry.get("id", "")).strip()
-            if entry_id.isdigit():
-                found_urls.append(f"https://rule34video.com/video/{entry_id}/")
-
-        return list(dict.fromkeys(found_urls))
-
-    def _discover_video_urls_from_page(self, url: str) -> list[str]:
-        request = Request(url, headers={"User-Agent": "Mozilla/5.0 (booru-tools)"})
-        with urlopen(request, timeout=30) as response:
-            html = response.read().decode("utf-8", errors="ignore")
-
-        raw_links = re.findall(r"href=[\"']([^\"']+)[\"']", html, flags=re.IGNORECASE)
-        found_urls: list[str] = []
-
-        for raw_link in raw_links:
-            normalised_url = self._normalise_video_url(raw_link)
-            if normalised_url:
-                found_urls.append(normalised_url)
+            for key in ["webpage_url", "original_url", "url"]:
+                candidate = self._normalise_candidate_url(entry.get(key), base_url=url)
+                if candidate:
+                    found_urls.append(candidate)
+                    break
 
         return list(dict.fromkeys(found_urls))
 
     def _resolve_video_urls(self, url: str) -> list[str]:
-        direct_url = self._normalise_video_url(url)
-        if direct_url:
-            return [direct_url]
-
         flat_playlist_urls = self._extract_flat_playlist_video_urls(url=url)
         if flat_playlist_urls:
             return flat_playlist_urls
 
-        try:
-            discovered_urls = self._discover_video_urls_from_page(url=url)
-        except Exception as e:
-            logger.warning(f"Unable to discover post URLs from '{url}' due to {e}")
-            return []
+        if self.url_resolver:
+            try:
+                resolved_urls = [
+                    candidate
+                    for candidate in self.url_resolver(url)
+                    if isinstance(candidate, str) and candidate.strip()
+                ]
+                if resolved_urls:
+                    return list(dict.fromkeys(resolved_urls))
+            except Exception as error:
+                logger.warning(f"Custom yt-dlp URL resolver failed for '{url}' due to {error}")
 
-        return discovered_urls
+        candidate = self._normalise_candidate_url(url, base_url=url)
+        return [candidate] if candidate else []
+
+    @staticmethod
+    def _normalise_metadata_identifier(raw_value: str) -> str:
+        candidate = re.sub(r"[^A-Za-z0-9._-]+", "-", str(raw_value).strip())
+        return candidate.strip("-._")
+
+    @classmethod
+    def _derive_metadata_id_from_urls(cls, metadata: dict) -> str:
+        for key in ["webpage_url", "original_url", "url"]:
+            raw_url = str(metadata.get(key, "") or "").strip()
+            if not raw_url:
+                continue
+
+            parsed = urlparse(raw_url)
+            path_segments = [segment for segment in parsed.path.split("/") if segment]
+            if not path_segments:
+                continue
+
+            identifier = cls._normalise_metadata_identifier(path_segments[-1])
+            if identifier:
+                return identifier
+
+        return ""
 
     def _extract_metadata(self, video_url: str) -> dict | None:
         params = [
@@ -164,88 +177,43 @@ class YtDlpManager(_base.DownloadManager):
             logger.warning(f"Invalid metadata JSON returned by yt-dlp for '{video_url}'")
             return None
 
-        return self._enrich_rule34video_metadata(metadata=metadata)
-
-    @staticmethod
-    def _parse_compact_count(value: str) -> int:
-        if value is None:
-            return 0
-
-        compact_value = value.strip().replace(",", "").replace(" ", "").upper()
-        if not compact_value:
-            return 0
-
-        multiplier = 1
-        if compact_value.endswith("K"):
-            multiplier = 1_000
-            compact_value = compact_value[:-1]
-        elif compact_value.endswith("M"):
-            multiplier = 1_000_000
-            compact_value = compact_value[:-1]
-
-        try:
-            return int(float(compact_value) * multiplier)
-        except ValueError:
-            return 0
-
-    def _extract_like_count_from_page(self, webpage_url: str) -> int:
-        if not webpage_url:
-            return 0
-
-        try:
-            request = Request(webpage_url, headers={"User-Agent": "Mozilla/5.0 (booru-tools)"})
-            with urlopen(request, timeout=30) as response:
-                html = response.read().decode("utf-8", errors="ignore")
-        except Exception as e:
-            logger.debug(f"Unable to fetch '{webpage_url}' for like_count fallback due to {e}")
-            return 0
-
-        patterns = [
-            r'class="voters\s+count"[^>]*>([^<]+)<',
-            r"class='voters\s+count'[^>]*>([^<]+)<",
-            r'"icon-thumbs-up"[^<]*<span>([^<]+)</span>',
-        ]
-
-        for pattern in patterns:
-            match = re.search(pattern, html, flags=re.IGNORECASE)
-            if not match:
-                continue
-
-            like_count = self._parse_compact_count(match.group(1))
-            if like_count:
-                return like_count
-
-        return 0
-
-    def _enrich_rule34video_metadata(self, metadata: dict) -> dict:
-        if not isinstance(metadata, dict):
-            return metadata
-
-        raw_like_count = metadata.get("like_count")
-        like_count = int(raw_like_count or 0)
-
-        if like_count <= 0:
-            webpage_url = metadata.get("webpage_url") or metadata.get("original_url") or ""
-            like_count = self._extract_like_count_from_page(webpage_url=webpage_url)
-            if like_count:
-                metadata["like_count"] = like_count
-
-        if like_count:
-            metadata["score"] = like_count
+        if self.metadata_enricher:
+            try:
+                metadata = self.metadata_enricher(metadata)
+            except Exception as error:
+                logger.warning(f"Custom metadata enricher failed for '{video_url}' due to {error}")
 
         return metadata
 
     def _get_metadata_id(self, metadata: dict) -> str:
-        metadata_id = str(metadata.get("id", "")).strip()
-        if metadata_id:
-            return metadata_id
+        if self.metadata_id_resolver:
+            try:
+                custom_identifier = self._normalise_metadata_identifier(self.metadata_id_resolver(metadata))
+                if custom_identifier:
+                    return custom_identifier
+            except Exception as error:
+                logger.warning(f"Custom metadata ID resolver failed due to {error}")
 
-        webpage_url = metadata.get("webpage_url") or metadata.get("original_url") or ""
-        match = re.search(r"/videos?/(\d+)", webpage_url)
-        if match:
-            return match.group(1)
+        direct_identifiers = [
+            metadata.get("id"),
+            metadata.get("display_id"),
+            metadata.get("uploader_id"),
+        ]
+        for direct_identifier in direct_identifiers:
+            normalised_identifier = self._normalise_metadata_identifier(str(direct_identifier or ""))
+            if normalised_identifier:
+                return normalised_identifier
 
-        raise ValueError("Unable to determine post id from yt-dlp metadata")
+        url_derived_identifier = self._derive_metadata_id_from_urls(metadata)
+        if url_derived_identifier:
+            return url_derived_identifier
+
+        extractor_name = self._normalise_metadata_identifier(str(metadata.get("extractor_key") or metadata.get("extractor") or ""))
+        fallback_payload = json.dumps(metadata, sort_keys=True, default=str)
+        fallback_hash = hashlib.sha1(fallback_payload.encode("utf-8")).hexdigest()[:16]
+        if extractor_name:
+            return f"{extractor_name}-{fallback_hash}"
+        return fallback_hash
 
     def download_info(self, urls: list[str], download_directory: Path) -> list[_base.DownloadItem]:
         download_directory.mkdir(parents=True, exist_ok=True)
@@ -255,7 +223,7 @@ class YtDlpManager(_base.DownloadManager):
             resolved_video_urls.extend(self._resolve_video_urls(url=url))
 
         resolved_video_urls = list(dict.fromkeys(resolved_video_urls))
-        logger.debug(f"Resolved {len(resolved_video_urls)} Rule34Video URLs")
+        logger.debug(f"Resolved {len(resolved_video_urls)} yt-dlp URLs")
 
         items: list[_base.DownloadItem] = []
         for video_url in resolved_video_urls:
@@ -361,8 +329,54 @@ class YtDlpManager(_base.DownloadManager):
         del skip_every_second_page
 
         self._downloaded_links = []
-        job = self.create_download_job([url])
-        yield job
+
+        temp_folder = self.create_temp_folder()
+        temp_folder.mkdir(parents=True, exist_ok=True)
+        metadata_cache_folder = temp_folder / "metadata-cache"
+        metadata_cache_folder.mkdir(parents=True, exist_ok=True)
+
+        download_items = self.download_info([url], metadata_cache_folder)
+
+        # Keep yt-dlp behavior efficient by extracting metadata once, then yielding scoped jobs.
+        # page_size=0 keeps prior "single batch" behavior.
+        chunk_size = self.page_size if self.page_size and self.page_size > 0 else len(download_items)
+
+        if not download_items:
+            logger.debug(f"No yt-dlp metadata items discovered for '{url}'")
+        else:
+            logger.debug(
+                f"Yielding yt-dlp download jobs in chunks of {chunk_size} "
+                f"for {len(download_items)} discovered items"
+            )
+
+        for start_index in range(0, len(download_items), chunk_size):
+            scoped_items = download_items[start_index:start_index + chunk_size]
+            chunk_index = (start_index // chunk_size) + 1
+            chunk_folder = temp_folder / f"chunk-{chunk_index:04d}"
+            chunk_folder.mkdir(parents=True, exist_ok=True)
+
+            job_items: list[_base.DownloadItem] = []
+            for item in scoped_items:
+                chunk_metadata_file = chunk_folder / item.metadata_file.name
+                shutil.move(str(item.metadata_file), str(chunk_metadata_file))
+
+                job_items.append(_base.DownloadItem(
+                    metadata_file=chunk_metadata_file,
+                    _download_override=item._download_override,
+                ))
+
+            logger.debug(
+                f"Yielding yt-dlp scoped job with {len(scoped_items)} items "
+                f"(offset={start_index})"
+            )
+
+            job = _base.DownloadJob(
+                download_folder=chunk_folder,
+                download_items=job_items,
+                _download_manager=self,
+            )
+            yield job
+            self._downloaded_links.extend(job._downloaded_links)
 
         self._downloaded_links = []
         return

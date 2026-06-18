@@ -168,3 +168,6 @@ test.sh
 config.yaml
 config.toml
 cookies.txt
+
+# Runtime caches
+.cache/

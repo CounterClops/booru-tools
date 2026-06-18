@@ -194,6 +194,10 @@ class ConfigManager(ConfigGroup):
             if field.name not in data_keys:
                 continue
 
+            if value is None:
+                logger.debug(f"skipping validation for field: {field.name} (value is None)")
+                continue
+
             logger.debug(f"validating field: {field.name} is {field.type.__name__}")
             try:
                 data[field.name] = field.type(

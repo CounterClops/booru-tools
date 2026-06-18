@@ -2,6 +2,7 @@ from pathlib import Path
 from loguru import logger
 from http.cookiejar import MozillaCookieJar
 from typing import Generator, Any
+from datetime import datetime, timedelta, timezone
 import json
 import shutil
 import hashlib
@@ -125,13 +126,21 @@ class BooruTools:
             logger.debug(f"Error starting session due to {e}")
         self.load_plugins()
 
+        # Expanded blacklist: populated by expand_blacklist_tags() with all aliases
+        # of each simple string entry as individual OR strings.
+        # None means not yet populated; populated list is used in check_post_allowed.
+        self._expanded_blacklist: list | None = None
+        # Per-tag alias map: {original_tag_name: [alias1, alias2, ...]}
+        # Used by check_post_allowed to resolve AND-condition entries at check time.
+        self._tag_aliases: dict | None = None
+
     def set_options(self,
             blacklisted_tags:str=None,
             required_tags:str=None,
             allowed_safety:str=None,
             minimum_score:str=None,
             add_video_metatags:str=None,
-            cleanup_temp_directories:str=None,
+            cleanup_temp_directories:bool=None,
             update_tag_categories:str=None,
             skip_every_second_page:str=None,
             post_update_concurrency:int=None,
@@ -151,6 +160,10 @@ class BooruTools:
 
         if minimum_score:
             self.config["core"]["minimum_score"] = int(minimum_score)
+
+        if cleanup_temp_directories is not None:
+            self.config["core"]["cleanup_temp_directories"] = bool(cleanup_temp_directories)
+            self.cleanup_temp_directories = bool(cleanup_temp_directories)
 
         if post_update_concurrency is not None:
             self.config["core"]["post_update_concurrency"] = max(1, int(post_update_concurrency))
@@ -389,6 +402,220 @@ class BooruTools:
         except OSError:
             return 0
 
+    async def _expand_blacklist_tag(self, tag_name: str, visited: set) -> set:
+        """Collect all aliases (names) for a single tag from the destination site.
+
+        Fetches the tag and returns all of its known names so that any alias of a
+        blacklisted tag is also treated as blacklisted. Implications are intentionally
+        not followed — expanding those was too broad and excluded unrelated posts.
+
+        Args:
+            tag_name (str): The primary name of the tag to expand.
+            visited (set): Names already looked up in this expansion (mutated in place).
+
+        Returns:
+            set: The tag name plus all of its aliases on the destination site.
+        """
+        if tag_name in visited:
+            return set()
+        visited.add(tag_name)
+        result = {tag_name}
+
+        try:
+            found_tag = await self.destination_plugin.find_exact_tag(
+                tag=resources.InternalTag(names=[tag_name])
+            )
+        except Exception as e:
+            logger.debug(f"Could not fetch blacklist tag '{tag_name}' from destination: {e}")
+            return result
+
+        if not found_tag:
+            return result
+
+        result.update(found_tag.names)
+
+        return result
+
+    # ------------------------------------------------------------------
+    # Blacklist disk cache helpers
+    # ------------------------------------------------------------------
+
+    def _blacklist_cache_hash(self, base_blacklist: list) -> str:
+        """Return a stable hex digest of the raw blacklist + destination name.
+        Any change to the list or the destination invalidates the cached file."""
+        payload = json.dumps(
+            {"destination": self.config["core"].get("destination", ""), "blacklist": base_blacklist},
+            sort_keys=True,
+            default=str
+        )
+        return hashlib.md5(payload.encode()).hexdigest()
+
+    def _load_blacklist_cache(self, base_blacklist: list) -> tuple | None:
+        """Try to load a valid expanded blacklist from disk.
+
+        Returns ``(expanded_blacklist, tag_aliases)`` if the file exists, is within
+        the configured TTL, and was generated from the same raw blacklist + destination.
+        Returns ``None`` on any miss or error.
+        """
+        ttl_hours = int(self.config["core"].get("blacklist_cache_ttl_hours", 24))
+        if ttl_hours <= 0:
+            return None
+
+        cache_file = Path(self.config["core"].get("blacklist_cache_file", "blacklist_cache.json"))
+
+        if not cache_file.exists():
+            logger.debug(f"Blacklist cache file '{cache_file}' not found")
+            return None
+
+        try:
+            with open(cache_file, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+
+            created_at = datetime.fromisoformat(data["created_at"])
+            expiry = created_at + timedelta(hours=ttl_hours)
+            now = datetime.now(tz=timezone.utc)
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+
+            if now > expiry:
+                logger.debug(
+                    f"Blacklist cache expired (created {created_at.isoformat()}, "
+                    f"TTL {ttl_hours}h, expired {expiry.isoformat()})"
+                )
+                return None
+
+            expected_hash = self._blacklist_cache_hash(base_blacklist)
+            if data.get("base_blacklist_hash") != expected_hash:
+                logger.debug("Blacklist cache hash mismatch — raw blacklist or destination changed")
+                return None
+
+            expanded = data["expanded_blacklist"]
+            tag_aliases = data.get("tag_aliases", {})
+            logger.info(
+                f"Loaded {len(expanded)} expanded blacklist entries from disk cache "
+                f"'{cache_file}' (expires {expiry.isoformat()})"
+            )
+            return expanded, tag_aliases
+
+        except Exception as e:
+            logger.warning(f"Could not read blacklist cache from '{cache_file}': {e}")
+            return None
+
+    def _save_blacklist_cache(self, base_blacklist: list, expanded: list, tag_aliases: dict) -> None:
+        """Persist the expanded blacklist and per-tag alias map to disk."""
+        ttl_hours = int(self.config["core"].get("blacklist_cache_ttl_hours", 24))
+        if ttl_hours <= 0:
+            return
+
+        cache_file = Path(self.config["core"].get("blacklist_cache_file", ".cache/blacklist_cache.json"))
+
+        try:
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            data = {
+                "created_at": datetime.now(tz=timezone.utc).isoformat(),
+                "base_blacklist_hash": self._blacklist_cache_hash(base_blacklist),
+                "base_blacklist": base_blacklist,
+                "tag_aliases": tag_aliases,
+                "expanded_blacklist": expanded,
+            }
+            with open(cache_file, "w", encoding="utf-8") as fh:
+                json.dump(data, fh, indent=2, default=str)
+            logger.debug(f"Blacklist cache saved to '{cache_file}' (TTL {ttl_hours}h)")
+        except Exception as e:
+            logger.warning(f"Could not save blacklist cache to '{cache_file}': {e}")
+
+    async def expand_blacklist_tags(self) -> None:
+        """Pre-populate the expanded blacklist from the destination site.
+
+        For every tag name that appears in the configured blacklist (including
+        individual tags inside AND conditions), this fetches the tag from the
+        destination plugin and collects all of its known aliases (names).
+
+        Simple OR entries are flattened into individual alias strings in
+        ``_expanded_blacklist`` so standard set-membership checking works.
+        AND entries (e.g. ``1futa|solo`` from YAML, or ``["1futa","solo"]`` from CLI)
+        are kept as sublists of the *original* tag names; at check time the
+        ``_tag_aliases`` dict resolves each name to its full alias set so that any
+        alias of every required tag triggers the AND match.
+
+        A disk cache (JSON) avoids re-querying the destination on every run.
+        It is invalidated when the TTL expires, the raw blacklist changes, or the
+        destination changes.  Set ``blacklist_cache_ttl_hours`` to ``0`` to disable.
+
+        Results are stored in ``self._expanded_blacklist`` / ``self._tag_aliases``
+        and reused on subsequent calls (idempotent — no-op if already populated).
+        """
+        if self._expanded_blacklist is not None:
+            return
+
+        if not hasattr(self, "destination_plugin"):
+            logger.debug("No destination plugin available; skipping blacklist expansion")
+            self._expanded_blacklist = self.config["core"]["blacklisted_tags"]
+            self._tag_aliases = {}
+            return
+
+        base_blacklist = self.config["core"]["blacklisted_tags"]
+        if not base_blacklist:
+            self._expanded_blacklist = []
+            self._tag_aliases = {}
+            return
+
+        # Try disk cache first
+        cached = self._load_blacklist_cache(base_blacklist)
+        if cached is not None:
+            self._expanded_blacklist, self._tag_aliases = cached
+            return
+
+        # Normalise entries: YAML stores "1futa|solo" as a plain string; split these
+        # into AND sublists so they are never sent to the API as a compound name.
+        normalized: list = []
+        for entry in base_blacklist:
+            if isinstance(entry, str) and "|" in entry:
+                normalized.append(entry.split("|"))
+            else:
+                normalized.append(entry)
+
+        # Collect every unique individual tag name we need to look up
+        individual_tags: set[str] = set()
+        for entry in normalized:
+            if isinstance(entry, str):
+                individual_tags.add(entry)
+            else:
+                individual_tags.update(entry)
+
+        # Expand each individual tag to its full alias set (one API call per tag)
+        tag_aliases: dict[str, list[str]] = {}
+        for tag_name in sorted(individual_tags):
+            aliases = await self._expand_blacklist_tag(tag_name, visited=set())
+            tag_aliases[tag_name] = sorted(aliases)
+
+        # Build the expanded blacklist:
+        #   - Simple OR strings  → add each alias as its own OR entry
+        #   - AND sublists       → keep the sublist of original names (resolved via
+        #                          tag_aliases at check time, no combinatorial explosion)
+        expanded: list = []
+        seen_strings: set = set()
+
+        for entry in normalized:
+            if isinstance(entry, str):
+                for alias in tag_aliases.get(entry, [entry]):
+                    if alias not in seen_strings:
+                        expanded.append(alias)
+                        seen_strings.add(alias)
+            else:
+                expanded.append(entry)
+
+        self._expanded_blacklist = expanded
+        self._tag_aliases = tag_aliases
+        logger.info(
+            f"Blacklist expanded: {len(base_blacklist)} raw entries → "
+            f"{len(expanded)} OR entries + "
+            f"{sum(1 for e in expanded if isinstance(e, list))} AND conditions, "
+            f"{len(tag_aliases)} individual tags aliased"
+        )
+
+        self._save_blacklist_cache(base_blacklist, expanded, tag_aliases)
+
     def check_post_allowed(self, post:resources.InternalPost) -> bool:
         """Check if the provided post resource meets the requirements to be uploaded
 
@@ -398,10 +625,31 @@ class BooruTools:
         Returns:
             bool: Whether the post is allowed to be uploaded
         """
-        blacklisted_tags = self.config["core"]["blacklisted_tags"]
-        if post.contains_any_tags(tags=blacklisted_tags):
-            logger.debug(f"Post '{post.id}' contains blacklisted tags from {blacklisted_tags}")
-            return False
+        if self._expanded_blacklist is not None and self._tag_aliases is not None:
+            post_tags = set(post.str_tags)
+            for entry in self._expanded_blacklist:
+                if isinstance(entry, str):
+                    if entry in post_tags:
+                        logger.debug(f"Post '{post.id}' contains blacklisted tag '{entry}'")
+                        return False
+                elif isinstance(entry, list):
+                    # AND condition: every component must be represented by at least
+                    # one of its aliases in the post's tag set
+                    all_present = all(
+                        any(alias in post_tags for alias in self._tag_aliases.get(tag, [tag]))
+                        for tag in entry
+                    )
+                    if all_present:
+                        logger.debug(
+                            f"Post '{post.id}' matches blacklisted AND condition {entry}"
+                        )
+                        return False
+        else:
+            # Fallback before expansion has run
+            blacklisted_tags = self.config["core"]["blacklisted_tags"]
+            if post.contains_any_tags(tags=blacklisted_tags):
+                logger.debug(f"Post '{post.id}' contains blacklisted tags from {blacklisted_tags}")
+                return False
         required_tags = self.config["core"]["required_tags"]
         if not post.contains_all_tags(tags=required_tags):
             logger.debug(f"Post '{post.id}' does not contain all required tags from {required_tags}")

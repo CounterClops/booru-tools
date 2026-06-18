@@ -3,8 +3,8 @@ from typing import Optional, Literal, Type, Generic, TypeVar, ParamSpec, Callabl
 from pathlib import Path
 from datetime import datetime, timezone
 from loguru import logger
-from async_lru import alru_cache
 from aiolimiter import AsyncLimiter
+from collections import OrderedDict
 from copy import deepcopy
 import traceback
 
@@ -13,6 +13,8 @@ import asyncio
 import aiohttp
 import json
 import functools
+
+_CACHE_MISS = object()  # sentinel used by the tag cache to distinguish "not cached" from cached None
 
 from booru_tools.plugins import _plugin_template
 from booru_tools.shared import resources, errors, constants
@@ -779,6 +781,40 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         )
 
         self.sql_fixes_file = Path("szurubooru_fixes.sql")
+
+        # Namespaced in-memory LRU tag cache for this plugin instance.
+        # Keys are individual tag name strings; values are Tag objects.
+        # _CACHE_MISS sentinel (not None) distinguishes a cache miss from a stored result.
+        self._tag_cache: OrderedDict[str, "Tag"] = OrderedDict()
+        self._tag_cache_max_size: int = 100_000
+
+    # ------------------------------------------------------------------
+    # Tag cache helpers
+    # ------------------------------------------------------------------
+
+    def _tag_cache_get(self, name: str):
+        """Return the cached Tag for *name*, or _CACHE_MISS if not cached.
+        Promotes the entry to most-recently-used on every hit."""
+        if name not in self._tag_cache:
+            return _CACHE_MISS
+        self._tag_cache.move_to_end(name)
+        return self._tag_cache[name]
+
+    def _tag_cache_put(self, tag: "Tag", names: list) -> None:
+        """Store *tag* under every entry in *names*, evicting the
+        least-recently-used entry when the cache exceeds its size limit."""
+        for name in names:
+            if name in self._tag_cache:
+                # Remove first so the OrderedDict records it as most-recent
+                del self._tag_cache[name]
+            self._tag_cache[name] = tag
+            while len(self._tag_cache) > self._tag_cache_max_size:
+                self._tag_cache.popitem(last=False)
+
+    def _tag_cache_evict(self, names: list) -> None:
+        """Remove every entry in *names* from the cache."""
+        for name in names:
+            self._tag_cache.pop(name, None)
     
     @property
     def token(self):
@@ -1191,19 +1227,31 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         
         return pool_search
 
-    @alru_cache(maxsize=1024, ttl=15)
+    async def _get_tag(self, tag:str) -> Tag|None:
+        cached = self._tag_cache_get(tag)
+        if cached is not _CACHE_MISS:
+            logger.debug(f"Tag cache hit for '{tag}'")
+            return cached
+
+        result = await self._get_tag_from_api(tag)
+
+        if result is not None:
+            self._tag_cache_put(result, result.names)
+
+        return result
+
     @errors.RetryOnExceptions(
         exceptions=[errors.GatewayTimeout, errors.ServiceUnavailable],
         wait_time=30,
         retry_limit=6
     )
     @SzurubooruErrorHandler()
-    async def _get_tag(self, tag:str) -> Tag|None:
+    async def _get_tag_from_api(self, tag:str) -> Tag|None:
         safe_tag = urllib.parse.quote(tag)
         url = f"{self.URL_BASE}/api/tag/{safe_tag}"
 
         async with self.rate_limiter:
-            logger.debug(f"Getting tag '{tag}'")
+            logger.debug(f"Getting tag '{tag}' from API")
             async with self.session.get(
                     url=url,
                     headers=self.headers,
@@ -1213,12 +1261,11 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
                     err.message = await response.text()
                     raise err
-            
 
         if response_json:
             tag = Tag.from_dict(response_json)
             return tag
-        
+
         return None
 
     @errors.RetryOnExceptions(
@@ -1257,6 +1304,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                     raise err
         
         tag = Tag.from_dict(response_json)
+        self._tag_cache_put(tag, tag.names)
+        logger.debug(f"Tag cache updated after creating '{tag.names[0]}' ({len(tag.names)} names)")
 
         return tag
 
@@ -1267,6 +1316,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
     )
     @SzurubooruErrorHandler()
     async def _update_tag(self, tag:resources.InternalTag) -> Tag:
+        # Capture input names before tag variable is reused for the API result
+        input_names = list(tag.names)
         safe_tag = urllib.parse.quote(tag.names[0])
         url = f"{self.URL_BASE}/api/tag/{safe_tag}"
 
@@ -1299,6 +1350,10 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                     raise err
 
         tag = Tag.from_dict(response_json)
+        # Evict stale entries for old names, then store under all current names
+        self._tag_cache_evict(input_names)
+        self._tag_cache_put(tag, tag.names)
+        logger.debug(f"Tag cache updated after updating '{tag.names[0]}' ({len(tag.names)} names)")
 
         return tag
 
@@ -1328,7 +1383,9 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
                     err.message = await response.text()
                     raise err
-        
+
+        self._tag_cache_evict(tag.names)
+        logger.debug(f"Tag cache evicted after deleting '{tag.names[0]}'")
         return None
 
     @errors.RetryOnExceptions(
@@ -1364,9 +1421,13 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                     raise err
 
         tag = Tag.from_dict(response_json)
+        # Remove the merged-away tag and update the merge target in the cache
+        self._tag_cache_evict(from_tag.names)
+        self._tag_cache_put(tag, tag.names)
+        logger.debug(f"Tag cache updated after merging '{from_tag.names[0]}' into '{tag.names[0]}'")
 
         return tag
-    
+
     @errors.RetryOnExceptions(
         exceptions=[errors.GatewayTimeout, errors.ServiceUnavailable],
         wait_time=30,

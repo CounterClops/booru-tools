@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from http.cookiejar import MozillaCookieJar
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
 from bs4 import BeautifulSoup
@@ -33,6 +34,347 @@ def _append_tag_if_missing(tags: list[resources.InternalTag], name: str, categor
     tags.append(resources.InternalTag(names=[normalised_name], category=category))
 
 
+def _parse_compact_count(value: str) -> int:
+    if value is None:
+        return 0
+
+    compact_value = str(value).strip().replace(",", "").replace(" ", "").upper()
+    if not compact_value:
+        return 0
+
+    multiplier = 1
+    if compact_value.endswith("K"):
+        multiplier = 1_000
+        compact_value = compact_value[:-1]
+    elif compact_value.endswith("M"):
+        multiplier = 1_000_000
+        compact_value = compact_value[:-1]
+
+    try:
+        return int(float(compact_value) * multiplier)
+    except ValueError:
+        return 0
+
+
+def _build_cookie_header(cookies_file: Path | None, *, domain: str) -> str:
+    if not cookies_file:
+        return ""
+
+    cookies_path = Path(cookies_file)
+    if not cookies_path.exists():
+        return ""
+
+    try:
+        cookie_jar = MozillaCookieJar()
+        cookie_jar.load(str(cookies_path), ignore_discard=True, ignore_expires=True)
+    except Exception as error:
+        logger.debug(f"Rule34Video cookie load failed for '{cookies_file}' due to {error}")
+        return ""
+
+    cookie_pairs: list[str] = []
+    for cookie in cookie_jar:
+        cookie_domain = (cookie.domain or "").lstrip(".").lower()
+        if not cookie_domain:
+            continue
+
+        if cookie_domain == domain or cookie_domain.endswith(f".{domain}"):
+            cookie_pairs.append(f"{cookie.name}={cookie.value}")
+
+    return "; ".join(cookie_pairs)
+
+
+class Rule34VideoYtDlpAdapter:
+    POST_URL_PATTERN = re.compile(r"https?://(?:www\.)?rule34video\.com/videos?/\d+(?:/[^\s\"'#?]+)?/?", re.IGNORECASE)
+    DOMAIN = "rule34video.com"
+    MAX_DISCOVERY_PAGES = 200
+
+    def __init__(self, *, allowed_blank_pages: int, cookies_file: Path | None):
+        self.allowed_blank_pages = allowed_blank_pages
+        self.cookie_header = _build_cookie_header(cookies_file, domain=self.DOMAIN)
+
+    def _normalise_video_url(self, url: str) -> str:
+        if not isinstance(url, str):
+            return ""
+
+        stripped_url = url.strip()
+        if not stripped_url:
+            return ""
+
+        if stripped_url.startswith("//"):
+            stripped_url = f"https:{stripped_url}"
+        elif not stripped_url.startswith(("http://", "https://")):
+            stripped_url = urljoin("https://rule34video.com", stripped_url)
+
+        parsed = urlparse(stripped_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return ""
+
+        clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        if self.POST_URL_PATTERN.match(clean_url):
+            return clean_url.rstrip("/") + "/"
+        return ""
+
+    def _canonicalise_listing_url(self, url: str, *, seed_url: str) -> str:
+        parsed = urlparse(url)
+        seed_parsed = urlparse(seed_url)
+
+        query = parse_qs(parsed.query)
+        canonical_query: dict[str, str] = {}
+
+        for key, values in query.items():
+            if not values:
+                continue
+
+            value = values[-1].strip()
+            if not value:
+                continue
+
+            if key == "from":
+                if not value.isdigit():
+                    continue
+                page_number = int(value)
+                if page_number <= 1:
+                    continue
+                value = str(page_number)
+
+            if key == "sort_by" and value == "post_date":
+                continue
+
+            canonical_query[key] = value
+
+        canonical_query_string = urlencode(sorted(canonical_query.items()))
+        canonical_path = parsed.path.rstrip("/") or "/"
+        seed_path = seed_parsed.path.rstrip("/") or "/"
+
+        if canonical_path == seed_path and not canonical_query_string:
+            return seed_url
+
+        return urlunparse((
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            "",
+            canonical_query_string,
+            "",
+        ))
+
+    def _fetch_html(self, url: str) -> str:
+        request_headers = {
+            "User-Agent": "Mozilla/5.0 (booru-tools)",
+        }
+
+        parsed = urlparse(url)
+        if self.cookie_header and self.DOMAIN in parsed.netloc.lower():
+            request_headers["Cookie"] = self.cookie_header
+
+        request = Request(url, headers=request_headers)
+        with urlopen(request, timeout=30) as response:
+            return response.read().decode("utf-8", errors="ignore")
+
+    def _extract_video_urls_from_html(self, html: str) -> list[str]:
+        raw_links = re.findall(r"href=[\"']([^\"']+)[\"']", html, flags=re.IGNORECASE)
+        resolved_urls: list[str] = []
+
+        for raw_link in raw_links:
+            post_url = self._normalise_video_url(raw_link)
+            if post_url:
+                resolved_urls.append(post_url)
+
+        return list(dict.fromkeys(resolved_urls))
+
+    def _extract_ajax_listing_page_urls(self, *, html: str, seed_url: str) -> list[str]:
+        seed_parsed = urlparse(seed_url)
+        ajax_page_urls: list[str] = []
+
+        for data_parameters in re.findall(r'data-parameters="([^"]+)"', html, flags=re.IGNORECASE):
+            query_params: dict[str, str] = {}
+            for segment in data_parameters.split(";"):
+                segment = segment.strip()
+                if not segment or ":" not in segment:
+                    continue
+
+                key, value = segment.split(":", 1)
+                key = key.strip()
+                value = value.strip()
+                if key and value:
+                    query_params[key] = value
+
+            if "from" not in query_params:
+                continue
+
+            query = urlencode(query_params)
+            ajax_url = urlunparse((
+                seed_parsed.scheme,
+                seed_parsed.netloc,
+                seed_parsed.path,
+                "",
+                query,
+                "",
+            ))
+            ajax_page_urls.append(self._canonicalise_listing_url(ajax_url, seed_url=seed_url))
+
+        return list(dict.fromkeys(ajax_page_urls))
+
+    def _extract_listing_page_urls(self, *, html: str, current_url: str, seed_url: str) -> list[str]:
+        seed_parsed = urlparse(seed_url)
+        seed_path = seed_parsed.path.rstrip("/") or "/"
+
+        candidate_links = re.findall(r"href=[\"']([^\"']+)[\"']", html, flags=re.IGNORECASE)
+        candidate_links.extend(
+            re.findall(r"<link[^>]+rel=[\"']next[\"'][^>]+href=[\"']([^\"']+)[\"']", html, flags=re.IGNORECASE)
+        )
+
+        listing_pages: list[str] = []
+        for raw_link in candidate_links:
+            resolved_url = urljoin(current_url, raw_link)
+            parsed = urlparse(resolved_url)
+
+            if parsed.scheme not in {"http", "https"}:
+                continue
+            if self.DOMAIN not in parsed.netloc.lower():
+                continue
+
+            clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+            if parsed.query:
+                clean_url = f"{clean_url}?{parsed.query}"
+
+            clean_url = self._canonicalise_listing_url(clean_url, seed_url=seed_url)
+
+            if clean_url == current_url or self._normalise_video_url(clean_url):
+                continue
+
+            path_without_slash = parsed.path.rstrip("/")
+            shares_seed_path = path_without_slash == seed_path or path_without_slash.startswith(f"{seed_path}/")
+            if not shares_seed_path:
+                continue
+
+            query_keys = set(parse_qs(parsed.query).keys())
+            has_pagination_marker = (
+                bool(re.search(r"/page/\d+/?$", parsed.path))
+                or "page" in query_keys
+                or "from" in query_keys
+                or "offset" in query_keys
+            )
+            if has_pagination_marker:
+                listing_pages.append(clean_url)
+
+        listing_pages.extend(self._extract_ajax_listing_page_urls(html=html, seed_url=seed_url))
+        return list(dict.fromkeys(listing_pages))
+
+    def _discover_video_urls_from_page(self, url: str) -> list[str]:
+        queue: list[str] = [url]
+        queued_pages: set[str] = {url}
+        visited_pages: set[str] = set()
+        discovered_post_urls: list[str] = []
+        seen_post_urls: set[str] = set()
+        blank_pages = 0
+
+        while queue and len(visited_pages) < self.MAX_DISCOVERY_PAGES:
+            page_url = queue.pop(0)
+            if page_url in visited_pages:
+                continue
+
+            visited_pages.add(page_url)
+
+            try:
+                html = self._fetch_html(url=page_url)
+            except Exception as error:
+                logger.debug(f"Rule34Video fallback crawl failed to fetch '{page_url}' due to {error}")
+                continue
+
+            page_post_urls = self._extract_video_urls_from_html(html=html)
+            new_page_post_urls = [post_url for post_url in page_post_urls if post_url not in seen_post_urls]
+
+            if new_page_post_urls:
+                discovered_post_urls.extend(new_page_post_urls)
+                seen_post_urls.update(new_page_post_urls)
+                blank_pages = 0
+            else:
+                blank_pages += 1
+                if blank_pages > self.allowed_blank_pages:
+                    break
+
+            for next_page_url in self._extract_listing_page_urls(html=html, current_url=page_url, seed_url=url):
+                if next_page_url in visited_pages or next_page_url in queued_pages:
+                    continue
+                queue.append(next_page_url)
+                queued_pages.add(next_page_url)
+
+        return list(dict.fromkeys(discovered_post_urls))
+
+    def resolve_video_urls(self, url: str) -> list[str]:
+        direct_url = self._normalise_video_url(url)
+        if direct_url:
+            return [direct_url]
+
+        parsed = urlparse(url)
+        if parsed.netloc and self.DOMAIN not in parsed.netloc.lower():
+            return []
+
+        try:
+            return self._discover_video_urls_from_page(url=url)
+        except Exception as error:
+            logger.warning(f"Rule34Video fallback URL discovery failed for '{url}' due to {error}")
+            return []
+
+    def _extract_like_count_from_page(self, webpage_url: str) -> int:
+        if not webpage_url:
+            return 0
+
+        try:
+            html = self._fetch_html(webpage_url)
+        except Exception as error:
+            logger.debug(f"Rule34Video fallback could not fetch '{webpage_url}' for like_count due to {error}")
+            return 0
+
+        patterns = [
+            r'class="voters\s+count"[^>]*>([^<]+)<',
+            r"class='voters\s+count'[^>]*>([^<]+)<",
+            r'"icon-thumbs-up"[^<]*<span>([^<]+)</span>',
+            r"\d+\s*%\s*\(([\d.,]+[KM]?)\)",
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, html, flags=re.IGNORECASE)
+            if not match:
+                continue
+
+            like_count = _parse_compact_count(match.group(1))
+            if like_count:
+                return like_count
+
+        return 0
+
+    def enrich_metadata(self, metadata: dict) -> dict:
+        if not isinstance(metadata, dict):
+            return metadata
+
+        raw_like_count = metadata.get("like_count")
+        like_count = _parse_compact_count(raw_like_count)
+        if like_count <= 0:
+            webpage_url = str(metadata.get("webpage_url") or metadata.get("original_url") or "").strip()
+            like_count = self._extract_like_count_from_page(webpage_url)
+            if like_count:
+                metadata["like_count"] = like_count
+
+        if like_count:
+            metadata["score"] = like_count
+
+        return metadata
+
+    def resolve_metadata_id(self, metadata: dict) -> str:
+        raw_id = str(metadata.get("id", "") or "").strip()
+        if raw_id:
+            return raw_id
+
+        webpage_url = str(metadata.get("webpage_url") or metadata.get("original_url") or "").strip()
+        match = re.search(r"/videos?/(\d+)", webpage_url)
+        if match:
+            return match.group(1)
+
+        return ""
+
+
 class SharedAttributes:
     _DOMAINS = [
         "rule34video.com",
@@ -57,7 +399,19 @@ class SharedAttributes:
         except (AttributeError, NotImplementedError):
             pass
 
-        self._downloader = ytp_dl.YtDlpManager()
+        config_manager = config.shared_config_manager
+        cookies_file: Path = config_manager["networking"]["cookies_file"]
+        allowed_blank_pages: int = config_manager["downloaders"]["gallery_dl"]["allowed_blank_pages"]
+
+        self._yt_dlp_adapter = Rule34VideoYtDlpAdapter(
+            allowed_blank_pages=allowed_blank_pages,
+            cookies_file=cookies_file,
+        )
+        self._downloader = ytp_dl.YtDlpManager(
+            url_resolver=self._yt_dlp_adapter.resolve_video_urls,
+            metadata_enricher=self._yt_dlp_adapter.enrich_metadata,
+            metadata_id_resolver=self._yt_dlp_adapter.resolve_metadata_id,
+        )
         return self._downloader
 
 
@@ -76,46 +430,12 @@ class Rule34VideoMeta(SharedAttributes, _plugin_template.MetadataPlugin):
 
     @staticmethod
     def _parse_compact_count(value: str) -> int:
-        if value is None:
-            return 0
-
-        compact_value = value.strip().replace(",", "").replace(" ", "").upper()
-        if not compact_value:
-            return 0
-
-        multiplier = 1
-        if compact_value.endswith("K"):
-            multiplier = 1_000
-            compact_value = compact_value[:-1]
-        elif compact_value.endswith("M"):
-            multiplier = 1_000_000
-            compact_value = compact_value[:-1]
-
-        try:
-            return int(float(compact_value) * multiplier)
-        except ValueError:
-            return 0
+        return _parse_compact_count(value)
 
     def _build_cookie_header(self, domain: str = "rule34video.com") -> str:
         config_manager = config.shared_config_manager
         cookies_file: Path = config_manager["networking"]["cookies_file"]
-        if not cookies_file:
-            return ""
-
-        try:
-            cookie_jar = MozillaCookieJar()
-            cookie_jar.load(cookies_file, ignore_discard=True, ignore_expires=True)
-        except Exception as e:
-            logger.debug(f"Rule34Video fallback could not load cookies from '{cookies_file}' due to {e}")
-            return ""
-
-        cookie_parts: list[str] = []
-        for cookie in cookie_jar:
-            if domain not in (cookie.domain or ""):
-                continue
-            cookie_parts.append(f"{cookie.name}={cookie.value}")
-
-        return "; ".join(cookie_parts)
+        return _build_cookie_header(cookies_file, domain=domain)
 
     def _extract_like_candidates_from_text(self, text: str) -> list[int]:
         candidates: list[int] = []

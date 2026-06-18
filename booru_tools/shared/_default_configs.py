@@ -21,6 +21,8 @@ class DefaultCoreConfig(DefaultConfigBaseGroup):
     cleanup_temp_directories:bool = field(default=True, metadata={"description": "Whether to cleanup temporary directories after running"})
     update_tag_categories:bool = field(default=True, metadata={"description": "Whether to update tag categories"})
     skip_every_second_page:bool = field(default=False, metadata={"description": "Whether to skip every second page when downloading"})
+    blacklist_cache_ttl_hours:int = field(default=24, metadata={"description": "How many hours the expanded blacklist disk cache is valid for. Set to 0 to disable disk caching."})
+    blacklist_cache_file:Path = field(default=Path(".cache/blacklist_cache.json"), metadata={"description": "Path to the file used to persist the expanded blacklist between runs."})
 
 ### Commands
 @dataclass(kw_only=True)

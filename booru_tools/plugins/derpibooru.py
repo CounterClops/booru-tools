@@ -56,9 +56,9 @@ class DerpibooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
         return id
 
     def get_sources(self, metadata:dict) -> list[str]:
-        source_urls:list = metadata.get("source_urls", [])
+        source_urls:list = metadata.get("source_urls") or []
         post_url = self.get_post_url(metadata=metadata)
-        sources:list = source_urls.append(post_url)
+        sources:list = source_urls + [post_url]
         return sources
 
     def get_description(self, metadata:dict) -> str:
