@@ -3,6 +3,7 @@ from loguru import logger
 from typing import Any, Type
 from dataclasses import dataclass, asdict, fields, is_dataclass
 
+import sys
 import yaml
 import os
 
@@ -212,3 +213,29 @@ shared_config_manager = ConfigManager(
     default_dataclass=_default_configs.DefaultConfig(),
     load_envars=True
 )
+
+
+def _setup_logging(config_manager: ConfigManager) -> None:
+    """Configure loguru handlers from the loaded config."""
+    log_cfg = config_manager["logging"]
+    level = str(log_cfg["level"] or "INFO").upper()
+
+    # Remove loguru's default stderr handler (id 0)
+    logger.remove()
+
+    if log_cfg["enable_console_logging"]:
+        logger.add(sys.stderr, level=level)
+
+    log_file = log_cfg["log_file"]
+    if log_file:
+        max_size = f"{log_cfg['max_log_size_mb'] or 10} MB"
+        rotations = log_cfg["max_log_rotations"] or 3
+        logger.add(
+            log_file,
+            level=level,
+            rotation=max_size,
+            retention=rotations,
+        )
+
+
+_setup_logging(shared_config_manager)

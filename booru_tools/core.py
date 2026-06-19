@@ -185,15 +185,10 @@ class BooruTools:
             GracefulExit: The exception to raise to shutdown the program
         """
         try:
-            loop = asyncio.get_event_loop()
-            logger.debug("Cancelling all async tasks")
             for task in asyncio.all_tasks():
                 task.cancel()
-            close_session_task = loop.create_task(self.session_manager.close())
-            loop.run_until_complete(close_session_task)
-            loop.stop()
         except RuntimeError:
-            logger.debug("No async loop")
+            logger.debug("No async loop when cancelling tasks")
         self.cleanup_process_directories()
         logger.info("Gracefully shutdown")
         raise GracefulExit()
@@ -708,6 +703,9 @@ class BooruTools:
             directory (Path): The directory to delete
         """
         logger.debug(f"Deleting '{directory}' folder")
+        if not Path(directory).exists():
+            logger.debug(f"Directory '{directory}' does not exist, skipping deletion")
+            return
         shutil.rmtree(directory)
     
     def add_missing_post_hashes(self, post:resources.InternalPost) -> resources.InternalPost:

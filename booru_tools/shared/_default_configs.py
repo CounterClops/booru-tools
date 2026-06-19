@@ -46,6 +46,8 @@ class DefaultDownloadersGalleryDlConfig(DefaultConfigBaseGroup):
     no_download:bool = field(default=False)
     extra_params:list = field(default_factory=list)
     ignored_file_extensions:list[str] = field(default_factory=lambda: [".zip"])
+    retry_attempts:int = field(default=3, metadata={"description": "Total number of times gallery-dl is attempted per page when it exits non-zero (1 = no retries)"})
+    retry_wait_seconds:int = field(default=60, metadata={"description": "Seconds to wait between gallery-dl retry attempts"})
 
 @dataclass(kw_only=True)
 class DefaultDownloadersConfig(DefaultConfigBaseGroup):

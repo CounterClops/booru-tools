@@ -116,7 +116,7 @@ class DerpibooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
         return url
     
     def _extract_tag_info(self, tag:str) -> list[str, str, list]:
-        split_tag = tag.split(":")
+        split_tag = tag.split(":", 1)
 
         tag_implications = []
         raw_tag_category = None

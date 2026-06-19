@@ -263,11 +263,18 @@ class ValidateUniquePostTags:
                     likely_tag_conflict = ("duplicate" in error_message) or ("tag_name" in error_message)
                     if not likely_tag_conflict:
                         raise
+                if isinstance(e, IntegrityError):
+                    # Version conflicts produce IntegrityError with this description — not a tag issue
+                    error_message = str(e).lower()
+                    is_version_conflict = ("modified" in error_message) or ("someone else" in error_message)
+                    if is_version_conflict:
+                        raise
 
                 logger.warning(f"{e} Going to check for tag conflicts and attempt a re-run")
                 func_self = args[0]
                 post:resources.InternalPost = kwargs.pop(self.post_param)
 
+                logger.info(f"Checking post '{post.id}' for conflicting tag aliases ({len(post.str_tags)} tags)")
                 conflicting_tags:list[Tag] = await func_self._get_conflicting_tags(
                     names=post.str_tags
                 )
@@ -294,6 +301,7 @@ class ValidateUniquePostTags:
                 normalized_tags:list[resources.InternalTag] = []
                 seen_tag_keys:set[tuple[str, str]] = set()
                 removed_tag_names:set[str] = set()
+                conflicting_group_names:set[str] = set()
 
                 for tag in post.tags:
                     resolved_tag = None
@@ -313,6 +321,7 @@ class ValidateUniquePostTags:
                     tag_key = (resolved_tag.category, resolved_tag.names[0])
                     if tag_key in seen_tag_keys:
                         removed_tag_names.update(tag.names)
+                        conflicting_group_names.add(resolved_tag.names[0])
                         continue
 
                     seen_tag_keys.add(tag_key)
@@ -323,6 +332,8 @@ class ValidateUniquePostTags:
                             removed_tag_names.add(original_name)
 
                 if normalized_tags:
+                    if conflicting_group_names:
+                        logger.info(f"Post '{post.id}': resolved {len(conflicting_group_names)} conflicting tag alias group(s)")
                     logger.debug(f"Normalized post '{post.id}' tags from {len(post.tags)} to {len(normalized_tags)}")
                     if removed_tag_names:
                         logger.debug(
@@ -932,7 +943,16 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         wait_time=30,
         retry_limit=6
     )
-    async def push_tag(self, tag:resources.InternalTag, replace_tags:bool=False, create_empty_tags:bool=True) -> resources.InternalTag:       
+    async def push_tag(self, tag:resources.InternalTag, replace_tags:bool=False, create_empty_tags:bool=True) -> resources.InternalTag:
+        # Szurubooru uses ':' for query namespacing — strip any tag names containing it
+        invalid_names = [name for name in tag.names if ":" in name]
+        if invalid_names:
+            logger.debug(f"Stripping {len(invalid_names)} tag name(s) containing ':' from '{tag.names[0]}': {invalid_names}")
+            tag.names = [name for name in tag.names if ":" not in name]
+        if not tag.names:
+            logger.debug(f"Skipping tag push: all names contained ':'")
+            return None
+
         # Work around as szurubooru returns a 500 error if tag names exceed 190 names
         tag.names = tag.names[:189]
         
@@ -1034,6 +1054,14 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         retry_limit=6
     )
     async def push_post(self, post:resources.InternalPost, force_update:bool=False) -> resources.InternalPost:
+        # Szurubooru uses ':' for query namespacing — strip any tag names containing it
+        invalid_names = [name for tag in post.tags for name in tag.names if ":" in name]
+        if invalid_names:
+            logger.debug(f"Stripping {len(invalid_names)} tag name(s) containing ':' from post '{post.id}': {invalid_names}")
+            for tag in post.tags:
+                tag.names = [name for name in tag.names if ":" not in name]
+            post.tags = [tag for tag in post.tags if tag.names]
+
         merge_ignored_fields = [
             "id",
             "category",
@@ -1056,7 +1084,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             similar_posts = await self.find_similar_posts(post=post)
 
             if not similar_posts:
-                logger.debug("No similar posts found, creating new post")
+                logger.info(f"Creating new post '{post.id}'")
                 try:
                     new_post = await self._create_post(post=post)
                 except errors.Conflict as error:
@@ -1074,11 +1102,16 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             closest_post = self._check_similar_posts_for_exact(posts=similar_posts)
             closest_post_resource = closest_post.to_resource()
             desired_post:resources.InternalPost = closest_post_resource.merge_resource(update_object=post, fields_to_ignore=merge_ignored_fields)
+            logger.info(f"Updating post '{desired_post.id}' (matched similar post)")
             try:
                 new_post = await self._update_post(post=desired_post)
                 self._generate_sql_fixes(post=desired_post)
-            except errors.Conflict as error:
-                logger.error(f"Failed to update post '{post.id}' with error '{error}'")
+            except (errors.Conflict, IntegrityError) as error:
+                error_str = str(error).lower()
+                if isinstance(error, IntegrityError) and ("modified" in error_str or "someone else" in error_str):
+                    logger.warning(f"Post '{desired_post.id}' version conflict — likely already updated by a previous attempt, re-fetching current state")
+                else:
+                    logger.error(f"Failed to update post '{post.id}' with error '{error}'")
                 new_post = await self.find_exact_post(post=desired_post)
             return new_post.to_resource()
         
@@ -1109,10 +1142,16 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             logger.debug(f"No changes found in post ({exact_post.id})")
             return None
         
+        logger.info(f"Updating post '{exact_post.id}' (metadata changes detected)")
         logger.debug(f"Changes found in post ({post.id}): {proposed_changes}")
-        updated_post = await self._update_post(
-            post=desired_post
-        )
+        try:
+            updated_post = await self._update_post(post=desired_post)
+        except IntegrityError as error:
+            error_str = str(error).lower()
+            if "modified" in error_str or "someone else" in error_str:
+                logger.warning(f"Post '{exact_post.id}' version conflict — likely already updated by a previous attempt, skipping")
+                return None
+            raise
         updated_post_resource = updated_post.to_resource()
 
         return updated_post_resource
@@ -1437,6 +1476,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
     async def _get_conflicting_tags(self, names:list[str]) -> list[Tag]:
         conflicting_tags:list[Tag] = []
         all_found_names:set[str] = set()
+        names_set:set[str] = set(names)
 
         for name in names:
             if name in all_found_names:
@@ -1448,13 +1488,12 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 continue
 
             found_tag_names = set(found_tag.names)
-            names_already_found = found_tag_names.issubset(all_found_names)
+            aliases_in_post = found_tag_names & names_set
+            if len(aliases_in_post) >= 2:
+                logger.debug(
+                    f"Tag '{found_tag.names[0]}' has {len(aliases_in_post)} conflicting aliases in post: {sorted(aliases_in_post)}"
+                )
 
-            logger.debug(f"Found a tag with the names {found_tag.names}")
-            if names_already_found:
-                continue
-
-            logger.debug(f"Found conflicting tag with {found_tag.names}")
             conflicting_tags.append(found_tag)
             all_found_names.update(found_tag_names)
 
@@ -1502,19 +1541,32 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             async with self.session.post(
                     url=url,
                     headers=self.headers,
-                    json=data
+                    json=data,
+                    raise_for_status=False
                 ) as response:
+                body = await response.text()
+                if response.status >= 400:
+                    raise aiohttp.ClientResponseError(
+                        response.request_info,
+                        response.history,
+                        status=response.status,
+                        message=body,
+                        headers=response.headers
+                    )
                 try:
-                    response_json = await response.json()
-                except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
-                    err.message = await response.text()
-                    raise err
+                    response_json = json.loads(body)
+                except (ValueError, Exception) as err:
+                    raise aiohttp.ContentTypeError(
+                        response.request_info,
+                        response.history,
+                        message=body
+                    ) from err
 
         post = Post.from_dict(response_json)
 
         return post
 
-    @ValidateUniquePostTags(post_param="new_post")
+    @ValidateUniquePostTags(post_param="post")
     @errors.RetryOnExceptions(
         exceptions=[errors.GatewayTimeout, errors.ServiceUnavailable, errors.TooManyRequestsError],
         wait_time=30,
@@ -1543,17 +1595,31 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         #     pass
 
         async with self.medium_rate_limiter:
+            logger.info(f"Updating post '{post.id}' with version {post_version}")
             logger.debug(f"Updating post '{post.id}' with data={data}")
             async with self.session.put(
                     url=url,
                     headers=self.headers,
-                    json=data
+                    json=data,
+                    raise_for_status=False
                 ) as response:
+                body = await response.text()
+                if response.status >= 400:
+                    raise aiohttp.ClientResponseError(
+                        response.request_info,
+                        response.history,
+                        status=response.status,
+                        message=body,
+                        headers=response.headers
+                    )
                 try:
-                    response_json = await response.json()
-                except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
-                    err.message = await response.text()
-                    raise err
+                    response_json = json.loads(body)
+                except (ValueError, Exception) as err:
+                    raise aiohttp.ContentTypeError(
+                        response.request_info,
+                        response.history,
+                        message=body
+                    ) from err
 
         post = Post.from_dict(response_json)
 

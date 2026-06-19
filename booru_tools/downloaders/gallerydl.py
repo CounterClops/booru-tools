@@ -2,6 +2,7 @@ from typing import Generator
 from loguru import logger
 from pathlib import Path
 import subprocess
+import time
 
 from booru_tools.downloaders import _base
 from booru_tools.shared import constants, config
@@ -20,6 +21,9 @@ class GalleryDlManager(_base.DownloadManager):
         self.allowed_blank_pages:int = config_manager["downloaders"]["gallery_dl"]["allowed_blank_pages"]
         self.ignored_file_extensions:list[str] = config_manager["downloaders"]["gallery_dl"]["ignored_file_extensions"]
         self.no_download:list[str] = config_manager["downloaders"]["gallery_dl"]["no_download"]
+        self.retry_attempts:int = config_manager["downloaders"]["gallery_dl"]["retry_attempts"]
+        self.retry_wait_seconds:int = config_manager["downloaders"]["gallery_dl"]["retry_wait_seconds"]
+        self._last_exit_code:int = 0
 
         if cookies_file:
             logger.debug(f"Using cookies file '{cookies_file}'")
@@ -41,11 +45,14 @@ class GalleryDlManager(_base.DownloadManager):
             url = f"{self.extractor}:{url}"
         return url
 
-    def call_gallerydl(self, params:list = []) -> None:
+    def call_gallerydl(self, params:list = []) -> int:
         """Call gallery-dl with the given parameters
 
         Args:
             params (list, optional): The list of params to provide gallery-dl. Defaults to [].
+
+        Returns:
+            int: The exit code from the gallery-dl process
         """
         command = [
             "gallery-dl",
@@ -53,8 +60,11 @@ class GalleryDlManager(_base.DownloadManager):
             *params
         ]
 
-        subprocess.run(command)
-        return None
+        result = subprocess.run(command)
+        self._last_exit_code = result.returncode
+        if result.returncode != 0:
+            logger.warning(f"gallery-dl exited with code {result.returncode}")
+        return result.returncode
     
     def download_info(self, urls:list[str], download_directory:Path) -> list[_base.DownloadItem]:
         """Download the metadata for the given urls, without downloading the media files
@@ -82,7 +92,12 @@ class GalleryDlManager(_base.DownloadManager):
                 metadata_file = json_file.absolute()
             )
             items.append(item)
-        
+
+        if not items:
+            logger.warning(f"No metadata files found after gallery-dl run in '{download_directory}'")
+        else:
+            logger.debug(f"Found {len(items)} metadata files in '{download_directory}'")
+
         return items
 
     def download_pending_items(self, job:_base.DownloadJob) -> _base.DownloadJob:
@@ -202,13 +217,32 @@ class GalleryDlManager(_base.DownloadManager):
             
             if self.page_size != 0:
                 range = f"{min_range}-{max_range}"
-                logger.debug(f"Downloading range {range} from {url}")
+                logger.info(f"Downloading range {range} from {url}")
                 params.append(f"--range={range}")
             else:
-                logger.debug(f"Downloading all posts from {url}")
+                logger.info(f"Downloading all posts from {url}")
             params.append(self.add_extractor_to_url(url))
 
-            job = self.create_download_job(params)
+            attempt = 0
+            while True:
+                attempt += 1
+                self._last_exit_code = 0
+                job = self.create_download_job(params)
+                if self._last_exit_code == 0:
+                    break
+                if attempt < self.retry_attempts:
+                    logger.warning(
+                        f"gallery-dl failed (exit {self._last_exit_code}) for '{url}', "
+                        f"retrying in {self.retry_wait_seconds}s "
+                        f"(attempt {attempt}/{self.retry_attempts})"
+                    )
+                    time.sleep(self.retry_wait_seconds)
+                else:
+                    logger.error(
+                        f"gallery-dl failed (exit {self._last_exit_code}) for '{url}' after "
+                        f"{attempt} {'attempt' if attempt == 1 else 'attempts'}, proceeding with empty page"
+                    )
+                    break
 
             min_range = max_range + 1 + offset_increment
             max_range += self.page_size + offset_increment
@@ -245,21 +279,20 @@ class GalleryDlManager(_base.DownloadManager):
             logger.debug(f"Download check disabled, new items found equal {new_items_found}")
             return new_items_found
         
-        logger.debug(f"Checking if download should continue")
         if not new_items_found:
-            logger.debug(f"No new items found, download should not continue")
+            logger.info(f"No new items found, stopping download for this URL")
             return False
         
         is_any_pending_downloads = bool(items_pending_download)
         if not is_any_pending_downloads:
             self._sequential_blank_pages += 1
-            logger.debug(f"Incrementing the sequential blank pages count to {self._sequential_blank_pages}")
+            logger.info(f"All posts on this page already exist in destination (blank page {self._sequential_blank_pages}/{self.allowed_blank_pages})")
 
         is_under_allowed_pages = self._sequential_blank_pages < self.allowed_blank_pages
         if is_under_allowed_pages:
             continue_download = True
         else:
-            logger.debug(f"Reached the blank page limit of {self.allowed_blank_pages}, stopping download")
+            logger.info(f"Reached the blank page limit of {self.allowed_blank_pages}, stopping download for this URL")
             continue_download = False
             
         return continue_download

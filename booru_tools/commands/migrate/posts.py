@@ -75,21 +75,38 @@ class MigratePostsCommand():
         await self.post_init(*args, **kwargs)
         processed_posts = []
 
-        for url in self.urls:
-            async for job in self.download_posts_from_url(url):
-                posts = [item.resource for item in job.download_items if item.ignore == False]
+        try:
+            for url in self.urls:
+                logger.info(f"Processing URL: {url}")
+                url_post_count = 0
                 try:
-                    processed_posts.extend([post.id for post in posts])
-                    await self.booru_tools.update_posts(posts=posts)
+                    async for job in self.download_posts_from_url(url):
+                        posts = [item.resource for item in job.download_items if item.ignore == False]
+                        try:
+                            url_post_count += len(posts)
+                            processed_posts.extend([post.id for post in posts])
+                            await self.booru_tools.update_posts(posts=posts)
+                        except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+                            raise
+                        except Exception as e:
+                            logger.critical(f"url import failed with {e}")
+                            logger.error(traceback.format_exc())
+                        finally:
+                            if self.booru_tools.cleanup_temp_directories:
+                                job.cleanup_folders()
+                except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+                    raise
                 except Exception as e:
-                    logger.critical(f"url import failed with {e}")
-                    logger.trace(traceback.format_exc())
-                finally:
-                    if self.booru_tools.cleanup_temp_directories:
-                        job.cleanup_folders()
-        
-        self.booru_tools.cleanup_process_directories()
-        await self.booru_tools.session_manager.close()
+                    logger.error(f"Failed to process URL '{url}': {e}")
+                    logger.error(traceback.format_exc())
+                else:
+                    logger.info(f"Finished URL '{url}': {url_post_count} posts queued for push")
+        finally:
+            self.booru_tools.cleanup_process_directories()
+            try:
+                await self.booru_tools.session_manager.close()
+            except BaseException:
+                pass
 
     def check_for_allowed_post(self, post:resources.InternalPost):
         if not self.booru_tools.check_post_allowed(post=post):
@@ -151,6 +168,19 @@ class MigratePostsCommand():
                         item.media_download_desired = True
                 else:
                     item.media_download_desired = True
+
+            total = len(job.download_items)
+            filtered = sum(1 for item in job.download_items if item.ignore)
+            new_posts = sum(1 for item in job.download_items if not item.ignore and item.media_download_desired)
+            existing_posts = total - filtered - new_posts
+
+            if total == 0:
+                logger.warning("Page returned no metadata — gallery-dl may have failed or the search has no results")
+            else:
+                logger.info(
+                    f"Page: {total} items — {new_posts} new (will download), "
+                    f"{existing_posts} already in destination, {filtered} filtered"
+                )
 
             job.download_media()
             yield job

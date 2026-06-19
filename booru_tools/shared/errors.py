@@ -121,8 +121,8 @@ class RetryOnExceptions:
                         self.last_error_message = e
                     except Conflict as e:
                         logger.warning(f"HTTP Conflict error when calling {func.__name__}, due to '{e}'")
-                        logger.debug(f"Stopping retry attempts as this is a HTTP conflict error")
-                        return None
+                        logger.debug(f"Re-raising conflict error to allow conflict detection logic to handle it")
+                        raise
                 logger.error(f"Retry limit reached when calling {func.__name__}, due to '{e}'")
                 logger.debug(f"Failure limit was reached when calling {func.__name__}, with args={args}, kwargs={kwargs}")
                 logger.trace(traceback.format_exc())
