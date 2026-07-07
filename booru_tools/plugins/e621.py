@@ -69,7 +69,20 @@ class E621Meta(SharedAttributes, _plugin_template.MetadataPlugin):
     def get_tags(self, metadata: dict) -> list[resources.InternalTag]:
         all_tags:list[resources.InternalTag] = []
 
-        for category, tags in metadata.get("tags", {}).items():
+        tags_data = metadata.get("tags")
+        if isinstance(tags_data, dict):
+            # Legacy gallery-dl format: {"category": ["tag", ...]}
+            tag_categories = tags_data.items()
+        else:
+            # Newer gallery-dl format: separate "tags_<category>" list fields,
+            # with "tags" itself being a flat list of every tag.
+            tag_categories = (
+                (key.removeprefix("tags_"), value)
+                for key, value in metadata.items()
+                if key.startswith("tags_") and isinstance(value, list)
+            )
+
+        for category, tags in tag_categories:
             for tag in tags:
                 tag = resources.InternalTag(
                     names=[tag],

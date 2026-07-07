@@ -18,6 +18,7 @@ _CACHE_MISS = object()  # sentinel used by the tag cache to distinguish "not cac
 
 from booru_tools.plugins import _plugin_template
 from booru_tools.shared import resources, errors, constants
+from booru_tools.shared.conflict_tag_cache import ConflictTagCache
 from booru_tools.downloaders import gallerydl
 
 class SzurubooruError(Exception):
@@ -219,6 +220,7 @@ class SzurubooruErrorHandler:
                 except json.decoder.JSONDecodeError as e:
                     szurubooru_error_class = errors.HTTP_CODE_MAP.get(error.status, None)
                     if szurubooru_error_class:
+                        logger.warning(f"Running {func.__name__} with args='{args}' kwargs='{kwargs}'")
                         raise szurubooru_error_class(f"Failed to decode error message. Full response text is '{error.message}'")
                     logger.warning(f"Failed to decode error message. Full response text is '{error.message}'")
                     logger.warning(f"Running {func.__name__} and provided the arguments args='{args}' and kwargs='{kwargs}'")
@@ -283,64 +285,8 @@ class ValidateUniquePostTags:
                     raise
 
                 logger.debug(f"Found {len(conflicting_tags)} conflicting tags, normalizing post tags")
+                post = func_self._apply_conflict_normalization(post, conflicting_tags)
 
-                canonical_tag_by_name:dict[str, resources.InternalTag] = {}
-                for conflicting_tag in conflicting_tags:
-                    if not conflicting_tag.names:
-                        continue
-
-                    primary_name = conflicting_tag.names[0]
-                    canonical_tag = resources.InternalTag(
-                        names=[primary_name],
-                        category=conflicting_tag.category
-                    )
-
-                    for name in conflicting_tag.names:
-                        canonical_tag_by_name[name] = canonical_tag
-
-                normalized_tags:list[resources.InternalTag] = []
-                seen_tag_keys:set[tuple[str, str]] = set()
-                removed_tag_names:set[str] = set()
-                conflicting_group_names:set[str] = set()
-
-                for tag in post.tags:
-                    resolved_tag = None
-                    for name in tag.names:
-                        resolved_tag = canonical_tag_by_name.get(name, None)
-                        if resolved_tag:
-                            break
-
-                    if not resolved_tag:
-                        if not tag.names:
-                            continue
-                        resolved_tag = resources.InternalTag(
-                            names=[tag.names[0]],
-                            category=tag.category
-                        )
-
-                    tag_key = (resolved_tag.category, resolved_tag.names[0])
-                    if tag_key in seen_tag_keys:
-                        removed_tag_names.update(tag.names)
-                        conflicting_group_names.add(resolved_tag.names[0])
-                        continue
-
-                    seen_tag_keys.add(tag_key)
-                    normalized_tags.append(resolved_tag)
-
-                    for original_name in tag.names:
-                        if original_name != resolved_tag.names[0]:
-                            removed_tag_names.add(original_name)
-
-                if normalized_tags:
-                    if conflicting_group_names:
-                        logger.info(f"Post '{post.id}': resolved {len(conflicting_group_names)} conflicting tag alias group(s)")
-                    logger.debug(f"Normalized post '{post.id}' tags from {len(post.tags)} to {len(normalized_tags)}")
-                    if removed_tag_names:
-                        logger.debug(
-                            f"Removed conflicting tag aliases for post '{post.id}': {sorted(removed_tag_names)}"
-                        )
-                    post.tags = normalized_tags
-                
                 kwargs[self.post_param] = post
                 return await func(*args, **kwargs)
 
@@ -773,6 +719,11 @@ class SzurubooruMeta(SharedAttributes, _plugin_template.MetadataPlugin):
         return url
 
 class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
+    _TAG_CONFLICT_PRECHECK_THRESHOLD: int = 50
+    conflict_tag_cache_enabled: bool = True
+    conflict_tag_cache_file: Path = Path(".cache/conflict_tag_cache.json")
+    conflict_tag_cache_ttl_hours: int = 168
+
     def __init__(self, session: aiohttp.ClientSession = None) -> None:
         self.session = session
         self.image_distance_threshold = 0.10
@@ -798,6 +749,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         # _CACHE_MISS sentinel (not None) distinguishes a cache miss from a stored result.
         self._tag_cache: OrderedDict[str, "Tag"] = OrderedDict()
         self._tag_cache_max_size: int = 100_000
+        self._sql_fixes_lock: asyncio.Lock = asyncio.Lock()
+        self._conflict_tag_cache: ConflictTagCache | None = None
 
     # ------------------------------------------------------------------
     # Tag cache helpers
@@ -823,9 +776,18 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 self._tag_cache.popitem(last=False)
 
     def _tag_cache_evict(self, names: list) -> None:
-        """Remove every entry in *names* from the cache."""
         for name in names:
             self._tag_cache.pop(name, None)
+
+    def _ensure_conflict_tag_cache(self) -> ConflictTagCache | None:
+        if self._conflict_tag_cache is not None:
+            return self._conflict_tag_cache
+        if not self.conflict_tag_cache_enabled:
+            return None
+        cache = ConflictTagCache(Path(self.conflict_tag_cache_file))
+        cache.load()
+        self._conflict_tag_cache = cache
+        return self._conflict_tag_cache
     
     @property
     def token(self):
@@ -969,6 +931,13 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 return None
 
         primary_tag = conflicting_tags[0]
+        # Conflict-cache stubs have version=0; re-fetch the live tag so _update_tag
+        # has the correct version and doesn't produce a KeyError or a bad-version request.
+        if primary_tag.version == 0:
+            fresh_tag = await self._get_tag(tag=primary_tag.names[0])
+            if fresh_tag:
+                logger.debug(f"Re-fetched '{primary_tag.names[0]}' to replace stale conflict-cache stub (version was 0)")
+                primary_tag = fresh_tag
         primary_tag_name = primary_tag.names[0]
         primary_tag_resource = primary_tag.to_resource()
         tag_changes = tag.diff(resource=primary_tag_resource)
@@ -1068,6 +1037,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             "deleted"
         ]
 
+        exact_post = None
         try:
             exact_post = await self.find_exact_post(post=post)
         except PostNotFoundError as error:
@@ -1085,6 +1055,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
             if not similar_posts:
                 logger.info(f"Creating new post '{post.id}'")
+                if len(post.str_tags) > self._TAG_CONFLICT_PRECHECK_THRESHOLD:
+                    post = await self._deduplicate_post_tags(post)
                 try:
                     new_post = await self._create_post(post=post)
                 except errors.Conflict as error:
@@ -1096,16 +1068,18 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
                 new_post_resource = new_post.to_resource()
                 if self.create_sql_fixes:
                     created_post_with_original_date:resources.InternalPost = new_post_resource.merge_resource(update_object=post, fields_to_ignore=merge_ignored_fields)
-                    self._generate_sql_fixes(post=created_post_with_original_date)
+                    await self._generate_sql_fixes(post=created_post_with_original_date)
                 return new_post_resource
 
             closest_post = self._check_similar_posts_for_exact(posts=similar_posts)
             closest_post_resource = closest_post.to_resource()
             desired_post:resources.InternalPost = closest_post_resource.merge_resource(update_object=post, fields_to_ignore=merge_ignored_fields)
             logger.info(f"Updating post '{desired_post.id}' (matched similar post)")
+            if len(desired_post.str_tags) > self._TAG_CONFLICT_PRECHECK_THRESHOLD:
+                desired_post = await self._deduplicate_post_tags(desired_post)
             try:
                 new_post = await self._update_post(post=desired_post)
-                self._generate_sql_fixes(post=desired_post)
+                await self._generate_sql_fixes(post=desired_post)
             except (errors.Conflict, IntegrityError) as error:
                 error_str = str(error).lower()
                 if isinstance(error, IntegrityError) and ("modified" in error_str or "someone else" in error_str):
@@ -1122,7 +1096,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         logger.debug(f"No local file found. Updating post metadata with id={exact_post.id}")
         
         desired_post:resources.InternalPost = exact_post.merge_resource(update_object=post, fields_to_ignore=merge_ignored_fields)
-        self._generate_sql_fixes(post=desired_post)
+        await self._generate_sql_fixes(post=desired_post)
         
         diff_ignored_fields = [
             "id",
@@ -1144,6 +1118,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         
         logger.info(f"Updating post '{exact_post.id}' (metadata changes detected)")
         logger.debug(f"Changes found in post ({post.id}): {proposed_changes}")
+        if len(desired_post.str_tags) > self._TAG_CONFLICT_PRECHECK_THRESHOLD:
+            desired_post = await self._deduplicate_post_tags(desired_post)
         try:
             updated_post = await self._update_post(post=desired_post)
         except IntegrityError as error:
@@ -1294,12 +1270,25 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             async with self.session.get(
                     url=url,
                     headers=self.headers,
+                    raise_for_status=False
                 ) as response:
+                body = await response.text()
+                if response.status >= 400:
+                    raise aiohttp.ClientResponseError(
+                        response.request_info,
+                        response.history,
+                        status=response.status,
+                        message=body,
+                        headers=response.headers
+                    )
                 try:
-                    response_json = await response.json()
-                except (aiohttp.ClientResponseError, aiohttp.ContentTypeError) as err:
-                    err.message = await response.text()
-                    raise err
+                    response_json = json.loads(body)
+                except (ValueError, Exception) as err:
+                    raise aiohttp.ContentTypeError(
+                        response.request_info,
+                        response.history,
+                        message=body
+                    ) from err
 
         if response_json:
             tag = Tag.from_dict(response_json)
@@ -1327,10 +1316,12 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             implication_names = []
             for implication in tag.implications:
                 implication_names.extend(implication.names)
-            data["implications"] = list(set(implication_names))
+            valid_implication_names = [name for name in implication_names if ":" not in name]
+            if valid_implication_names:
+                data["implications"] = list(set(valid_implication_names))
 
         async with self.medium_rate_limiter:
-            logger.debug(f"Creating tag '{tag.names[0]}' with data={[tag]}")
+            logger.debug(f"Creating tag '{tag.names[0]}' with data={data}")
             async with self.session.post(
                     url=url,
                     headers=self.headers,
@@ -1373,10 +1364,12 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
             implication_names = []
             for implication in tag.implications:
                 implication_names.extend(implication.names)
-            data["implications"] = list(set(implication_names))
+            valid_implication_names = [name for name in implication_names if ":" not in name]
+            if valid_implication_names:
+                data["implications"] = list(set(valid_implication_names))
 
         async with self.medium_rate_limiter:
-            logger.debug(f"Attempting to update tag '{tag.names[0]}' with data={[tag]}")
+            logger.debug(f"Attempting to update tag '{tag.names[0]}' with data={data}")
             async with self.session.put(
                     url=url,
                     headers=self.headers,
@@ -1478,27 +1471,116 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         all_found_names:set[str] = set()
         names_set:set[str] = set(names)
 
-        for name in names:
-            if name in all_found_names:
-                continue
+        conflict_cache = self._ensure_conflict_tag_cache()
 
+        async def _lookup(name: str) -> tuple:
+            if conflict_cache is not None:
+                cached = conflict_cache.get(name, ttl_hours=self.conflict_tag_cache_ttl_hours)
+                if cached is not None:
+                    return name, Tag(
+                        names=cached["names"],
+                        category=cached.get("category", ""),
+                        version=0,
+                    )
             try:
-                found_tag:Tag = await self._get_tag(tag=name)
+                return name, await self._get_tag(tag=name)
             except TagNotFoundError:
+                return name, None
+
+        results: list = list(await asyncio.gather(*[_lookup(n) for n in names]))
+
+        for name, found_tag in results:
+            if found_tag is None:
+                continue
+            if name in all_found_names:
                 continue
 
             found_tag_names = set(found_tag.names)
             aliases_in_post = found_tag_names & names_set
-            if len(aliases_in_post) >= 2:
+            if len(aliases_in_post) >= 1:
                 logger.debug(
                     f"Tag '{found_tag.names[0]}' has {len(aliases_in_post)} conflicting aliases in post: {sorted(aliases_in_post)}"
                 )
+                conflicting_tags.append(found_tag)
 
-            conflicting_tags.append(found_tag)
             all_found_names.update(found_tag_names)
 
+        if conflict_cache is not None:
+            for _name, found_tag in results:
+                if found_tag is not None:
+                    conflict_cache.put(found_tag.names, found_tag.category)
+            conflict_cache.save()
+
         return conflicting_tags
-    
+
+    def _apply_conflict_normalization(
+        self,
+        post: resources.InternalPost,
+        conflicting_tags: list,
+    ) -> resources.InternalPost:
+        canonical_tag_by_name: dict[str, resources.InternalTag] = {}
+        for conflicting_tag in conflicting_tags:
+            if not conflicting_tag.names:
+                continue
+            primary_name = conflicting_tag.names[0]
+            canonical_tag = resources.InternalTag(
+                names=[primary_name],
+                category=conflicting_tag.category
+            )
+            for name in conflicting_tag.names:
+                canonical_tag_by_name[name] = canonical_tag
+
+        normalized_tags: list[resources.InternalTag] = []
+        seen_tag_keys: set[tuple[str, str]] = set()
+        removed_tag_names: set[str] = set()
+        conflicting_group_names: set[str] = set()
+
+        for tag in post.tags:
+            resolved_tag = None
+            for name in tag.names:
+                resolved_tag = canonical_tag_by_name.get(name, None)
+                if resolved_tag:
+                    break
+
+            if not resolved_tag:
+                if not tag.names:
+                    continue
+                resolved_tag = resources.InternalTag(
+                    names=[tag.names[0]],
+                    category=tag.category
+                )
+
+            tag_key = (resolved_tag.category, resolved_tag.names[0])
+            if tag_key in seen_tag_keys:
+                removed_tag_names.update(tag.names)
+                conflicting_group_names.add(resolved_tag.names[0])
+                continue
+
+            seen_tag_keys.add(tag_key)
+            normalized_tags.append(resolved_tag)
+
+            for original_name in tag.names:
+                if original_name != resolved_tag.names[0]:
+                    removed_tag_names.add(original_name)
+
+        if normalized_tags:
+            if conflicting_group_names:
+                logger.info(f"Post '{post.id}': resolved {len(conflicting_group_names)} conflicting tag alias group(s)")
+            logger.debug(f"Normalized post '{post.id}' tags from {len(post.tags)} to {len(normalized_tags)}")
+            if removed_tag_names:
+                logger.debug(
+                    f"Removed conflicting tag aliases for post '{post.id}': {sorted(removed_tag_names)}"
+                )
+            post.tags = normalized_tags
+
+        return post
+
+    async def _deduplicate_post_tags(self, post: resources.InternalPost) -> resources.InternalPost:
+        conflicting_tags = await self._get_conflicting_tags(names=post.str_tags)
+        if not conflicting_tags:
+            return post
+        return self._apply_conflict_normalization(post, conflicting_tags)
+
     def _correct_first_tag(self, primary_tag_name:str, tag:Tag|resources.InternalTag) -> Tag|resources.InternalTag:
         logger.error(f"First tag does not exist, moving primary tag '{primary_tag_name}' to first tag of {tag.names}")
         index_of_primary_tag = tag.names.index(primary_tag_name)
@@ -1761,7 +1843,7 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
 
         return image_search
     
-    def _generate_sql_fixes(self, post:resources.InternalPost) -> None:
+    async def _generate_sql_fixes(self, post:resources.InternalPost) -> None:
         if not self.create_sql_fixes:
             return None
         if not post.created_at:
@@ -1770,7 +1852,8 @@ class SzurubooruClient(SharedAttributes, _plugin_template.ApiPlugin):
         postgres_timestamp = post.created_at.astimezone(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         logger.debug(f"Converted datetime from {post.created_at} to postgres timestamp {postgres_timestamp}")
         sql_update_statement = f"UPDATE post SET creation_time = (TIMESTAMP '{postgres_timestamp}') WHERE id = '{post.id}';"
-        with open(self.sql_fixes_file, 'a') as file:
-            logger.debug(f"Appending sql query [{sql_update_statement}] to {self.sql_fixes_file}")
-            file.write(sql_update_statement + '\n')
+        async with self._sql_fixes_lock:
+            with open(self.sql_fixes_file, 'a') as file:
+                logger.debug(f"Appending sql query [{sql_update_statement}] to {self.sql_fixes_file}")
+                file.write(sql_update_statement + '\n')
         return None

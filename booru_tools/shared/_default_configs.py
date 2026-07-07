@@ -67,6 +67,9 @@ class DefaultPluginsSzurubooruConfig(DefaultConfigBaseGroup):
     URL_BASE:str = field(default=None)
     create_sql_fixes:bool = field(default=False)
     force_source_check:bool = field(default=True)
+    conflict_tag_cache_enabled:bool = field(default=True, metadata={"description": "Enable disk cache for tag alias groups to speed up conflict detection across runs"})
+    conflict_tag_cache_file:Path = field(default=Path(".cache/conflict_tag_cache.json"), metadata={"description": "Path to the conflict tag alias cache file"})
+    conflict_tag_cache_ttl_hours:int = field(default=168, metadata={"description": "How many hours a conflict tag cache entry remains valid. Set to 0 to disable expiry."})
 
 @dataclass(kw_only=True)
 class DefaultPluginsRule34Config(DefaultConfigBaseGroup):
@@ -93,6 +96,15 @@ class DefaultToolsFfmpegConfig(DefaultConfigBaseGroup):
 class DefaultToolsConfig(DefaultConfigBaseGroup):
     ffmpeg:DefaultToolsFfmpegConfig = field(default_factory=DefaultToolsFfmpegConfig)
 
+### Logging
+@dataclass(kw_only=True)
+class DefaultLoggingConfig(DefaultConfigBaseGroup):
+    level:str = field(default="INFO", metadata={"description": "The minimum log level to output (DEBUG, INFO, WARNING, ERROR, CRITICAL)"})
+    enable_console_logging:bool = field(default=True, metadata={"description": "Whether to output logs to the console"})
+    log_file:str = field(default="booru_tools.log", metadata={"description": "The file to write logs to"})
+    max_log_size_mb:int = field(default=10, metadata={"description": "Maximum log file size in MB before rotation"})
+    max_log_rotations:int = field(default=3, metadata={"description": "Number of rotated log files to keep"})
+
 ### Default Config
 @dataclass(kw_only=True)
 class DefaultConfig(DefaultConfigBaseGroup):
@@ -102,3 +114,4 @@ class DefaultConfig(DefaultConfigBaseGroup):
     networking:DefaultNetworkingConfig = field(default_factory=DefaultNetworkingConfig)
     plugins:DefaultPluginsConfig = field(default_factory=DefaultPluginsConfig)
     tools:DefaultToolsConfig = field(default_factory=DefaultToolsConfig)
+    logging:DefaultLoggingConfig = field(default_factory=DefaultLoggingConfig)
